@@ -119,6 +119,11 @@ struct MyRouteView: View {
             #endif
 
             Section {
+                NavigationLink { ReturnFlowView() } label: {
+                    Label("Retorno de producto", systemImage: "arrow.uturn.backward.square")
+                        .foregroundStyle(model.header?.startedAt == nil ? Color.secondary : Color.primary)
+                }
+                .disabled(model.header?.startedAt == nil)
                 NavigationLink { ReturnsView() } label: {
                     Label("Retornados", systemImage: "arrow.uturn.left")
                 }

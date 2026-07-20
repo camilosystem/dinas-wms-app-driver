@@ -15,6 +15,7 @@ final class StubDispatchAPI: AuthAPI, DispatchAPI, @unchecked Sendable {
     private(set) var startRouteCalls = 0
     private(set) var deliverCalls: [(uuid: String, request: DeliverRequest)] = []
     private(set) var finishCalls = 0
+    private(set) var returnCalls: [SubmitReturnRequest] = []
 
     private func guardOnline() throws {
         if offline { throw URLError(.notConnectedToInternet) }
@@ -55,5 +56,11 @@ final class StubDispatchAPI: AuthAPI, DispatchAPI, @unchecked Sendable {
     func finishRoute() async throws -> RouteSummary {
         try guardOnline(); finishCalls += 1
         return summary ?? RouteSummary(truckID: route?.truckID ?? "T")
+    }
+
+    func submitReturn(_ request: SubmitReturnRequest) async throws -> ProductReturn {
+        try guardOnline()
+        returnCalls.append(request)
+        return ProductReturn(returnID: "RET-\(returnCalls.count)")
     }
 }

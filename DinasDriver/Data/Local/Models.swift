@@ -63,6 +63,57 @@ enum ItemRejectionReason: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Por qué el cliente DEVUELVE producto de facturas anteriores (★ v0.15.0, retorno). Distinto
+/// de `ItemRejectionReason` (que es lo que se rechaza al recibir la entrega de hoy).
+enum ProductReturnReason: String, Codable, CaseIterable, Identifiable {
+    case danado = "DANADO"
+    case expirado = "EXPIRADO"
+    case noLoQuiere = "NO_LO_QUIERE"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .danado: return "Dañado"
+        case .expirado: return "Expirado"
+        case .noLoQuiere: return "No lo quiere"
+        }
+    }
+}
+
+// MARK: - Catálogo (para buscar al registrar un retorno, offline)
+
+/// Un ítem vendible del catálogo (★ v0.15.0). Baja con la ruta (`DriverRoute.item_catalog`,
+/// ~540 ítems) para que el driver busque por código o nombre al registrar un retorno — que es
+/// de facturas anteriores, así que el ítem puede no estar en el camión de hoy.
+struct CatalogItem: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
+    var itemCode: String
+    var itemName: String
+
+    var id: String { itemCode }
+    static let databaseTableName = "catalog_items"
+
+    enum CodingKeys: String, CodingKey {
+        case itemCode = "item_code"
+        case itemName = "item_name"
+    }
+}
+
+/// Un ítem de un retorno, tal como lo arma el driver. Se guarda en la cola y viaja al servidor.
+struct ProductReturnItemInput: Codable, Equatable, Identifiable {
+    var itemCode: String
+    var itemName: String
+    var quantity: Double
+    var reason: ProductReturnReason
+
+    var id: String { itemCode }
+
+    enum CodingKeys: String, CodingKey {
+        case itemCode = "item_code"
+        case itemName = "item_name"
+        case quantity, reason
+    }
+}
+
 // MARK: - Snapshot de la ruta (GRDB, descompuesto de DriverRoute)
 
 /// Cabecera de la ruta descargada (tabla `route`, una sola fila). `downloaded_at` marca que
@@ -202,9 +253,10 @@ struct LocalStopOrder: Codable, FetchableRecord, PersistableRecord, Equatable {
 // MARK: - Cola offline
 
 enum PendingActionKind: String, Codable {
-    case startRoute = "START_ROUTE"    // iniciar la ruta (singleton por camión)
-    case deliver = "DELIVER"           // registrar la entrega de un pedido (idempotente por pedido)
-    case finishRoute = "FINISH_ROUTE"  // cerrar la ruta (singleton por camión)
+    case startRoute = "START_ROUTE"      // iniciar la ruta (singleton por camión)
+    case deliver = "DELIVER"             // registrar la entrega de un pedido (idempotente por pedido)
+    case finishRoute = "FINISH_ROUTE"    // cerrar la ruta (singleton por camión)
+    case productReturn = "PRODUCT_RETURN" // ★ v0.15.0 — retorno de producto (con foto en disco)
 }
 
 enum PendingActionStatus: String, Codable {
@@ -230,6 +282,13 @@ struct PendingAction: Codable, FetchableRecord, MutablePersistableRecord, Identi
     var createdAt: Date
     var status: PendingActionStatus
     var errorMessage: String?
+    // ★ v0.15.0 — RETORNO de producto. `photoPath` es la RUTA al JPEG en disco (no los bytes);
+    // se borra al sincronizar. `returnItems` son los ítems devueltos; `clientReference` la
+    // referencia opcional del cliente (factura/remisión).
+    var clientCode: String? = nil
+    var returnItems: [ProductReturnItemInput]? = nil
+    var clientReference: String? = nil
+    var photoPath: String? = nil
 
     static let databaseTableName = "pending_actions"
 
@@ -245,6 +304,10 @@ struct PendingAction: Codable, FetchableRecord, MutablePersistableRecord, Identi
         case createdAt = "created_at"
         case status
         case errorMessage = "error_message"
+        case clientCode = "client_code"
+        case returnItems = "return_items"
+        case clientReference = "client_reference"
+        case photoPath = "photo_path"
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }

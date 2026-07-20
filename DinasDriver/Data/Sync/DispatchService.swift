@@ -42,13 +42,16 @@ final class DispatchService: ObservableObject {
     private let api: DispatchAPI
     private let onUnauthorized: () -> Void
     private let now: () -> Date
+    let photos: PhotoStore
 
     init(database: AppDatabase, api: DispatchAPI,
          now: @escaping () -> Date = Date.init,
+         photos: PhotoStore = PhotoStore(),
          onUnauthorized: @escaping () -> Void = {}) {
         self.repo = DriverRepository(database: database, now: now)
         self.api = api
         self.now = now
+        self.photos = photos
         self.onUnauthorized = onUnauthorized
         downloadState = ((try? repo.hasRoute()) == true) ? .downloaded : .notDownloaded
         refreshPending()
@@ -114,6 +117,22 @@ final class DispatchService: ObservableObject {
         Task { await syncPending() }
     }
 
+    /// Redimensiona y guarda la foto de la cámara en disco; devuelve su RUTA (para el retorno).
+    func savePhoto(_ imageData: Data) throws -> String {
+        try photos.saveResized(from: imageData)
+    }
+
+    /// Registra un RETORNO de producto. `occurred_at` se captura AQUÍ (hora de la visita). La
+    /// foto ya está en disco (photoPath); en la cola solo va su ruta.
+    func registerReturn(truckID: String, clientCode: String, items: [ProductReturnItemInput],
+                        note: String?, clientReference: String?, photoPath: String) {
+        try? repo.enqueueReturn(truckID: truckID, clientCode: clientCode, items: items,
+                                note: note, clientReference: clientReference,
+                                photoPath: photoPath, occurredAt: now())
+        refreshPending()
+        Task { await syncPending() }
+    }
+
     // MARK: - Sincronización (replay idempotente)
 
     func syncPending() async {
@@ -157,6 +176,22 @@ final class DispatchService: ObservableObject {
         case .finishRoute:
             let summary = try await api.finishRoute()
             serverSummary = summary
+        case .productReturn:
+            guard let path = action.photoPath, let clientCode = action.clientCode,
+                  let items = action.returnItems, !items.isEmpty else {
+                throw APIError.server(status: 400, message: "Retorno incompleto.")   // permanente → FAILED
+            }
+            guard FileManager.default.fileExists(atPath: path) else {
+                throw APIError.server(status: 400, message: "La foto del retorno ya no está en el teléfono.")
+            }
+            let base64 = try photos.base64(atPath: path)
+            let request = SubmitReturnRequest(
+                clientCode: clientCode,
+                items: items.map { .init(itemCode: $0.itemCode, quantity: $0.quantity, reason: $0.reason) },
+                photoBase64: base64, note: action.note, occurredAt: action.occurredAt,
+                clientReference: action.clientReference)
+            _ = try await api.submitReturn(request)
+            photos.delete(atPath: path)   // ★ borra la foto del teléfono al sincronizar
         }
     }
 

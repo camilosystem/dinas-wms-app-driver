@@ -20,24 +20,19 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-
-	<!-- URL del middleware (incluye path base /v1). Configurar por entorno. -->
 	<key>MIDDLEWARE_BASE_URL</key>
 	<string>$(MIDDLEWARE_BASE_URL)</string>
-
-	<!-- El middleware vive en la LAN del almacén (IP privada). iOS exige permiso de
-	     "red local" para conectarse a rangos RFC1918; sin esta descripción el sistema
-	     bloquea la conexión y el login/sync fallan por "error de conexión". -->
+	<key>NSCameraUsageDescription</key>
+	<string>Para tomar la foto de evidencia del retorno de producto.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>La app se conecta al servidor de Dinas en la red local para iniciar sesión y sincronizar el catálogo, los clientes y las órdenes.</string>
-
-	<key>UILaunchScreen</key>
-	<dict/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
 	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

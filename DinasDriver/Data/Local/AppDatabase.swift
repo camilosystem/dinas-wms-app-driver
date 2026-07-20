@@ -117,6 +117,21 @@ struct AppDatabase {
             }
         }
 
+        // ★ v0.15.0 — RETORNO de producto (Bloque 4B). Catálogo para buscar offline + campos del
+        // retorno en la cola. La FOTO no va en SQLite: la cola guarda su RUTA en disco (photo_path).
+        migrator.registerMigration("v2_returns") { db in
+            try db.create(table: "catalog_items") { t in
+                t.primaryKey("item_code", .text)
+                t.column("item_name", .text).notNull().defaults(to: "")
+            }
+            try db.alter(table: "pending_actions") { t in
+                t.add(column: "client_code", .text)
+                t.add(column: "return_items", .text)       // JSON
+                t.add(column: "client_reference", .text)
+                t.add(column: "photo_path", .text)          // ruta al JPEG en disco
+            }
+        }
+
         return migrator
     }
 }

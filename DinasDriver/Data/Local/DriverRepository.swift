@@ -43,6 +43,31 @@ struct DriverRepository {
                                     deliveryStatus: o.deliveryStatus, lines: o.lines).insert(db)
                 }
             }
+
+            // ★ v0.15.0 — catálogo para buscar al registrar un retorno (offline).
+            try CatalogItem.deleteAll(db)
+            for item in download.itemCatalog { try item.insert(db) }
+        }
+    }
+
+    /// Busca en el catálogo por código o nombre (offline). Vacío → primeros por nombre.
+    func searchCatalog(_ query: String, limit: Int = 40) throws -> [CatalogItem] {
+        try database.dbQueue.read { db in
+            let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if q.isEmpty {
+                return try CatalogItem.order(Column("item_name")).limit(limit).fetchAll(db)
+            }
+            let like = "%\(q)%"
+            return try CatalogItem
+                .filter(Column("item_code").like(like) || Column("item_name").like(like))
+                .order(Column("item_name")).limit(limit).fetchAll(db)
+        }
+    }
+
+    /// ¿Es `clientCode` una parada de la ruta descargada? (el retorno solo a clientes de su ruta).
+    func isClientOnRoute(_ clientCode: String) throws -> Bool {
+        try database.dbQueue.read { db in
+            try DriverStop.filter(Column("client_code").collating(.nocase) == clientCode).fetchCount(db) > 0
         }
     }
 
@@ -123,6 +148,22 @@ struct DriverRepository {
     /// Encola el cierre de ruta (idempotente por camión).
     func enqueueFinishRoute(truckID: String) throws {
         try enqueueSingleton(truckID: truckID, kind: .finishRoute)
+    }
+
+    /// Encola un RETORNO de producto. `photoPath` = ruta al JPEG en disco (la foto NO va a la
+    /// BD). `occurredAt` = hora real de la visita (verbatim al replay). Cada retorno es una
+    /// acción distinta (no se deduplica: el servidor asigna un return_id por POST).
+    func enqueueReturn(truckID: String, clientCode: String, items: [ProductReturnItemInput],
+                       note: String?, clientReference: String?, photoPath: String,
+                       occurredAt: Date) throws {
+        try database.dbQueue.write { db in
+            var a = PendingAction(id: nil, truckID: truckID, kind: .productReturn, orderUUID: nil,
+                                  orderReason: nil, rejectedItems: nil, note: note,
+                                  occurredAt: occurredAt, createdAt: now(), status: .pending,
+                                  errorMessage: nil, clientCode: clientCode, returnItems: items,
+                                  clientReference: clientReference, photoPath: photoPath)
+            try a.insert(db)
+        }
     }
 
     private func enqueueSingleton(truckID: String, kind: PendingActionKind) throws {

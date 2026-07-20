@@ -18,6 +18,8 @@ struct RouteDownload: Decodable {
     let totalOrders: Int
     let pendingOrders: Int
     let stops: [Stop]
+    /// ★ v0.15.0 — catálogo vendible para buscar al registrar un retorno (offline).
+    let itemCatalog: [CatalogItem]
 
     enum CodingKeys: String, CodingKey {
         case truckID = "truck_id"
@@ -29,6 +31,7 @@ struct RouteDownload: Decodable {
         case totalOrders = "total_orders"
         case pendingOrders = "pending_orders"
         case stops
+        case itemCatalog = "item_catalog"
     }
 
     init(from decoder: Decoder) throws {
@@ -42,6 +45,7 @@ struct RouteDownload: Decodable {
         totalOrders = try c.decodeIfPresent(Int.self, forKey: .totalOrders) ?? 0
         pendingOrders = try c.decodeIfPresent(Int.self, forKey: .pendingOrders) ?? 0
         stops = try c.decodeIfPresent([Stop].self, forKey: .stops) ?? []
+        itemCatalog = try c.decodeIfPresent([CatalogItem].self, forKey: .itemCatalog) ?? []
     }
 
     struct Stop: Decodable {
@@ -161,6 +165,53 @@ struct DeliveryRecord: Decodable {
     init(orderUUID: String, status: DeliveryStatus?) {
         self.orderUUID = orderUUID; self.status = status
     }
+}
+
+// MARK: - Retorno de producto (POST /dispatch/returns, ★ v0.15.0)
+
+/// Cuerpo del retorno. TODO en una petición: o entra completo con su evidencia, o no entra.
+/// `photoBase64` = la foto YA redimensionada por la app, en base64 SIN prefijo data-uri.
+struct SubmitReturnRequest: Encodable {
+    let clientCode: String
+    let items: [Item]
+    let photoBase64: String
+    let note: String?
+    let occurredAt: Date
+    let clientReference: String?
+
+    struct Item: Encodable {
+        let itemCode: String
+        let quantity: Double
+        let reason: ProductReturnReason
+
+        enum CodingKeys: String, CodingKey {
+            case itemCode = "item_code"
+            case quantity, reason
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case clientCode = "client_code"
+        case items
+        case photoBase64 = "photo_base64"
+        case note
+        case occurredAt = "occurred_at"
+        case clientReference = "client_reference"
+    }
+}
+
+/// Respuesta del retorno (schema `ProductReturn`). Solo se usa el id (confirmación).
+struct ProductReturn: Decodable {
+    let returnID: String
+
+    enum CodingKeys: String, CodingKey { case returnID = "return_id" }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        returnID = try c.decodeIfPresent(String.self, forKey: .returnID) ?? ""
+    }
+
+    init(returnID: String) { self.returnID = returnID }
 }
 
 // MARK: - Terminar ruta (POST /dispatch/finish-route)

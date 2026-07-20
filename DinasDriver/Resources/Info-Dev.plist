@@ -1,14 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  Info.plist SOLO para el ambiente DEV (build Debug). Idéntico al Info.plist base más
-  una excepción de App Transport Security para poder hablar con el middleware local por
-  HTTP sin cifrar durante el desarrollo.
-
-  NSAllowsLocalNetworking permite cleartext HTTP únicamente a destinos de RED LOCAL
-  (rangos privados RFC 1918 como 192.168.x.x / 10.x.x.x, y .local). NO habilita HTTP a
-  Internet público. Staging y Prod usan Info.plist (sin excepción) → siguen exigiendo HTTPS.
--->
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
@@ -29,31 +20,24 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-
-	<!-- URL del middleware (incluye path base /v1). Configurar por entorno. -->
 	<key>MIDDLEWARE_BASE_URL</key>
 	<string>$(MIDDLEWARE_BASE_URL)</string>
-
-	<!-- Excepción ATS SOLO en Dev: HTTP a red local. Prod/Staging NO la tienen. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-
-	<!-- Permiso de "red local" (iOS Local Network Privacy). Distinto de ATS: iOS gatea
-	     las conexiones a IPs privadas (RFC 1918) y sin esta descripción el sistema las
-	     bloquea → login/sync fallan con "servidor inalcanzable". -->
+	<key>NSCameraUsageDescription</key>
+	<string>Para tomar la foto de evidencia del retorno de producto.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>La app se conecta al servidor de Dinas en la red local para iniciar sesión y sincronizar el catálogo, los clientes y las órdenes.</string>
-
-	<key>UILaunchScreen</key>
-	<dict/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
 	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

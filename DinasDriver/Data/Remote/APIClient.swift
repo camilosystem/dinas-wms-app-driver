@@ -21,6 +21,8 @@ protocol DispatchAPI: Sendable {
     func deliver(orderUUID: String, request: DeliverRequest) async throws -> DeliveryRecord
     /// `POST /dispatch/finish-route`. EN_RUTA → RUTA_CERRADA. Devuelve el resumen.
     func finishRoute() async throws -> RouteSummary
+    /// `POST /dispatch/returns`. Registra un retorno de producto (foto base64 en el JSON). 201.
+    func submitReturn(_ request: SubmitReturnRequest) async throws -> ProductReturn
 }
 
 /// Cliente HTTP contra el middleware, según `contracts/openapi.yaml` (v0.14.0).
@@ -74,6 +76,12 @@ struct APIClient: AuthAPI, DispatchAPI {
     func finishRoute() async throws -> RouteSummary {
         let request = try makeRequest(path: "dispatch/finish-route", method: "POST")
         return try await send(request, decode: RouteSummary.self)
+    }
+
+    func submitReturn(_ body: SubmitReturnRequest) async throws -> ProductReturn {
+        let data = try JSONCoding.encoder.encode(body)
+        let request = try makeRequest(path: "dispatch/returns", method: "POST", body: data)
+        return try await send(request, decode: ProductReturn.self)
     }
 
     // MARK: - Alcanzabilidad
