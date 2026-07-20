@@ -1,9 +1,49 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.14.0
+  version: 0.15.0
   description: >
     Contrato de la API del middleware Dinas WMS.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.15.0 — RETORNO DE PRODUCTO (Bloque 4B)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ ES
+      El cliente devuelve mercancía de FACTURAS ANTERIORES (no de la entrega de
+      hoy — eso son los rejected_items del 4A). El driver la recibe durante su
+      visita, la documenta con una FOTO, y queda registrada para el admin.
+
+    ★ ES UN REGISTRO, NO UN MOVIMIENTO DE INVENTARIO
+      Nada se escribe a SAP. El admin lo procesa manualmente. Cuando exista
+      BIN LOAD, ahí se decidirá el reingreso al stock.
+
+    ★ EL CLIENTE ES DE SU RUTA
+      No se busca entre todos los clientes: el retorno es de una de las paradas
+      que el driver ya tiene descargadas. Si no va a pasar por ese cliente, no
+      hay quien le entregue la mercancía.
+      Puede registrarlo en CUALQUIER MOMENTO de la ruta, no solo estando en esa
+      parada.
+
+    ★ EL ÍTEM SE BUSCA EN EL CATÁLOGO COMPLETO
+      Un retorno es de compras anteriores, así que el ítem puede NO estar en el
+      camión de hoy. La app descarga el catálogo de ítems vendibles junto con la
+      ruta (~540 ítems) para poder buscar sin conexión, por código o nombre.
+
+    ★ VARIOS ÍTEMS POR RETORNO, UNA FOTO
+      Cada ítem con su cantidad y su motivo: DANADO · EXPIRADO · NO_LO_QUIERE.
+      La FOTO es OBLIGATORIA — es la evidencia de lo que se recibió.
+
+    ★ LA FOTO VIAJA EN EL MISMO POST (base64)
+      La app la REDIMENSIONA antes de enviar (~1024px, calidad ~70% → 150-300KB).
+      Una sola petición: o entra el retorno completo con su foto, o no entra.
+      Eso es lo que exige que la foto sea obligatoria — un segundo paso podría
+      fallar y dejar retornos sin evidencia.
+      El middleware la guarda EN DISCO y conserva la ruta en la base.
+
+    ★ OFFLINE
+      Se encola como todo lo demás. La foto se guarda local hasta que haya
+      señal. `occurred_at` lleva la hora real de la visita.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.14.0 — DESPACHO / APP DE DRIVER (Bloque 4A)
@@ -559,6 +599,10 @@ tags:
     description: Asignación de camiones a drivers (Bloque 4A).
   - name: dispatch
     description: Despacho en la calle — la app del driver (Bloque 4A).
+  - name: returns
+    description: Retorno de producto desde la ruta (Bloque 4B).
+  - name: returns-admin
+    description: Retornos vistos por el admin (Bloque 4B).
 
 paths:
   /auth/login:
@@ -2448,6 +2492,163 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /dispatch/returns:
+    post:
+      tags: [returns]
+      summary: Registrar un retorno de producto (con foto)
+      description: >
+        ★ v0.15.0 — REQUIERE rol DRIVER con camión EN_RUTA.
+
+        El cliente devuelve mercancía de FACTURAS ANTERIORES. El driver la
+        recibe, la documenta con una foto, y queda registrada para el admin.
+        NO afecta inventario — es un registro (nada se escribe a SAP).
+
+        Reglas:
+          · El `client_code` debe ser de una parada de SU ruta → 400 si no.
+          · Al menos un ítem, cada uno con cantidad > 0 y motivo.
+          · La FOTO es OBLIGATORIA (base64, ya redimensionada por la app).
+          · `occurred_at` = la hora real de la visita (clave para el offline).
+
+        La app manda todo en UNA petición: o entra el retorno completo con su
+        evidencia, o no entra.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_code, items, photo_base64]
+              properties:
+                client_code:
+                  type: string
+                  description: El cliente que devuelve. Debe ser una parada de su ruta.
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [item_code, quantity, reason]
+                    properties:
+                      item_code: { type: string }
+                      quantity: { type: number, format: double }
+                      reason: { $ref: '#/components/schemas/ProductReturnReason' }
+                photo_base64:
+                  type: string
+                  description: >
+                    La foto en base64, SIN el prefijo data-uri. La app la
+                    redimensiona antes (~1024px, calidad ~70%) para que pese
+                    150-300KB. OBLIGATORIA.
+                note: { type: string, nullable: true }
+                occurred_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: >
+                    Cuándo ocurrió la visita. Si se registró sin señal y
+                    sincroniza después, esta es la hora real.
+                client_reference:
+                  type: string
+                  nullable: true
+                  description: >
+                    Referencia opcional que dé el cliente (número de factura,
+                    remisión). Texto libre — no se valida contra nada.
+      responses:
+        '201':
+          description: Retorno registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductReturn' }
+        '400':
+          description: >
+            Cliente que no es de su ruta; sin ítems; cantidad inválida; ítem
+            que no existe; foto ausente o ilegible.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: El camión no está EN_RUTA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dispatch/returns/mine:
+    get:
+      tags: [returns]
+      summary: Los retornos que registró el driver en esta ruta
+      description: >
+        ★ v0.15.0 — REQUIERE rol DRIVER. Para que el driver revise lo que lleva
+        registrado. No incluye la foto (solo si la tiene).
+      responses:
+        '200':
+          description: Los retornos de su ruta actual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  returns:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProductReturn' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/returns:
+    get:
+      tags: [returns-admin]
+      summary: Retornos de producto registrados
+      description: >
+        ★ v0.15.0 — REQUIERE ADMIN. Lo que los drivers han recibido de vuelta.
+        El admin lo procesa manualmente (no hay movimiento de inventario
+        automático).
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Desde esta fecha (inclusive). Por defecto, hoy.
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Hasta esta fecha (inclusive). Por defecto, hoy.
+      responses:
+        '200':
+          description: Los retornos del período
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  returns:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProductReturn' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/returns/{return_id}/photo:
+    get:
+      tags: [returns-admin]
+      summary: La foto de un retorno
+      description: >
+        ★ v0.15.0 — REQUIERE ADMIN. Devuelve la imagen para verla en el
+        Dashboard. El middleware la sirve desde disco.
+      parameters:
+        - name: return_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: La imagen
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3312,6 +3513,18 @@ components:
             ★ El driver puede reordenarlas EN SU VISTA, pero eso NO cambia este
             orden — es una preferencia local del dispositivo.
           items: { $ref: '#/components/schemas/DriverStop' }
+        item_catalog:
+          type: array
+          description: >
+            ★ v0.15.0 — El catálogo de ítems vendibles (~540), para que el driver
+            pueda buscar por código o nombre al registrar un RETORNO DE PRODUCTO
+            sin conexión. Un retorno es de facturas anteriores, así que el ítem
+            puede NO estar en el camión de hoy.
+          items:
+            type: object
+            properties:
+              item_code: { type: string }
+              item_name: { type: string }
 
     DriverStop:
       type: object
@@ -3400,6 +3613,66 @@ components:
         reason: { $ref: '#/components/schemas/ItemRejectionReason' }
         order_number: { type: string }
         client_name: { type: string }
+
+    ProductReturnReason:
+      type: string
+      enum: [DANADO, EXPIRADO, NO_LO_QUIERE]
+      description: >
+        ★ v0.15.0 — Por qué el cliente devuelve el producto.
+        Distinto de ItemRejectionReason (que es para lo que se rechaza al
+        RECIBIR la entrega de hoy): esto es mercancía de facturas anteriores.
+
+    ProductReturn:
+      type: object
+      description: >
+        ★ v0.15.0 — Un retorno de producto registrado por un driver en ruta.
+      properties:
+        return_id: { type: string, format: uuid }
+        truck_id: { type: string, format: uuid }
+        truck_name: { type: string, nullable: true }
+        driver_username: { type: string }
+        driver_name: { type: string, nullable: true }
+        client_code: { type: string }
+        client_name: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ProductReturnItem' }
+        total_units:
+          type: number
+          format: double
+          description: Suma de las cantidades de todos los ítems.
+        has_photo:
+          type: boolean
+          description: >
+            Siempre true (la foto es obligatoria), pero se expone para que el
+            Dashboard sepa si puede pedirla.
+        photo_url:
+          type: string
+          nullable: true
+          description: >
+            La ruta para pedir la imagen — GET /admin/returns/{id}/photo.
+            La foto NO viaja en este schema.
+        note: { type: string, nullable: true }
+        client_reference:
+          type: string
+          nullable: true
+          description: Referencia que dio el cliente (factura, remisión). Texto libre.
+        occurred_at:
+          type: string
+          format: date-time
+          description: Cuándo ocurrió la visita (hora real, no la de sincronización).
+        recorded_at:
+          type: string
+          format: date-time
+          description: Cuándo llegó al servidor.
+
+    ProductReturnItem:
+      type: object
+      properties:
+        item_code: { type: string }
+        item_name: { type: string }
+        quantity: { type: number, format: double }
+        reason: { $ref: '#/components/schemas/ProductReturnReason' }
 
     TruckStatus:
       type: string
