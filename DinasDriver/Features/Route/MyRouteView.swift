@@ -9,6 +9,8 @@ struct MyRouteView: View {
     @StateObject private var model = MyRouteViewModel()
 
     @State private var showReorderWarning = false
+    /// Modo reordenar: mientras está activo se arrastra; apagado, las paradas se abren al tocar.
+    @State private var reordering = false
 
     var body: some View {
         NavigationStack {
@@ -87,7 +89,7 @@ struct MyRouteView: View {
                 }
             }
 
-            Section("Paradas") {
+            Section {
                 ForEach(model.stops) { stop in
                     NavigationLink {
                         StopView(stop: stop)
@@ -100,9 +102,20 @@ struct MyRouteView: View {
                     model.move(from: from, to: to)
                     showReorderWarning = true
                 }
+            } header: {
+                HStack {
+                    Text("Paradas")
+                    Spacer()
+                    // Reordenar es OPCIONAL y bajo demanda: por defecto las paradas se ABREN al
+                    // tocar (el modo edición permanente rompía la navegación).
+                    if model.stops.count > 1 {
+                        Button(reordering ? "Listo" : "Reordenar") { reordering.toggle() }
+                            .textCase(nil).font(.callout.weight(.semibold))
+                    }
+                }
             }
             #if os(iOS)
-            .environment(\.editMode, .constant(.active))   // arrastrar siempre disponible
+            .environment(\.editMode, .constant(reordering ? .active : .inactive))
             #endif
 
             Section {
