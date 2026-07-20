@@ -1,0 +1,12 @@
+#include "Base.xcconfig"
+
+// Ambiente de DESARROLLO (build Debug).
+APP_DISPLAY_NAME = Dinas Driver (Dev)
+PRODUCT_BUNDLE_IDENTIFIER = com.dinas.driver.dev
+
+// Info.plist con excepción ATS (permite HTTP a red local). Solo Dev.
+INFOPLIST_FILE = DinasDriver/Resources/Info-Dev.plist
+
+// Middleware local (.NET/Kestrel) en la red de la Mac. HTTP → requiere el Info-Dev.plist.
+// El truco /$()/ evita que el // del esquema se lea como comentario en xcconfig.
+MIDDLEWARE_BASE_URL = http:/$()/192.168.1.33:5257/v1

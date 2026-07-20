@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements de la app. keychain-access-groups da a la app un grupo de Keychain
+  propio (necesario para guardar el JWT con SecItemAdd). El grupo usa el bundle ID del
+  ambiente, así que sirve para Dev/Staging/Prod. En dispositivo, el perfil de
+  aprovisionamiento debe incluir este grupo (la firma automática/enterprise lo hace).
+-->
+<plist version="1.0">
+<dict>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	</array>
+</dict>
+</plist>

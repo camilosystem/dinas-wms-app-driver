@@ -1,0 +1,15 @@
+# Swift / SPM
+.build/
+.swiftpm/xcode/package.xcworkspace/
+Package.resolved
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# macOS
+.DS_Store
+
+# Proyecto Xcode generado por Scripts/generate_project.rb
+DinasDriver.xcodeproj/

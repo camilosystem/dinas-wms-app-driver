@@ -1,0 +1,8 @@
+#include "Base.xcconfig"
+
+// Ambiente de STAGING (build Staging).
+APP_DISPLAY_NAME = Dinas Driver (Staging)
+PRODUCT_BUNDLE_IDENTIFIER = com.dinas.driver.staging
+
+// ⚠️ PLACEHOLDER — reemplazar por la URL real del middleware de staging (incluye /v1).
+MIDDLEWARE_BASE_URL = https:/$()/staging.api.dinas-wms.example.com/v1

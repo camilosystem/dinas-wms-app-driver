@@ -1,0 +1,18 @@
+// Configuración común a todos los ambientes.
+// Cada ambiente incluye este archivo y sobreescribe lo que cambia.
+
+APP_DISPLAY_NAME = Dinas Driver
+PRODUCT_BUNDLE_IDENTIFIER = com.dinas.driver
+
+// Info.plist por defecto (Prod/Staging): SIN excepción ATS → exige HTTPS.
+// Dev lo sobreescribe con Info-Dev.plist (permite HTTP a red local).
+INFOPLIST_FILE = DinasDriver/Resources/Info.plist
+
+// Firma. Poner el Team ID de Apple (10 caracteres) para archivar/distribuir por JAMF.
+// Vacío está bien para compilar a simulador; requerido para build de dispositivo.
+DEVELOPMENT_TEAM =
+
+// Nota xcconfig: "//" inicia un comentario en CUALQUIER punto de la línea, así que
+// un https://... rompería el valor. El truco $(...) vacío separa las barras:
+//   https:/$()/host   =>   https://host
+MIDDLEWARE_BASE_URL =
