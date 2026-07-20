@@ -38,7 +38,7 @@ final class DispatchService: ObservableObject {
     /// El resumen del servidor tras cerrar (si llegó). Si no, se usa el local.
     @Published private(set) var serverSummary: RouteSummary?
 
-    let repo: DriverRepository
+    private(set) var repo: DriverRepository
     private let api: DispatchAPI
     private let onUnauthorized: () -> Void
     private let now: () -> Date
@@ -50,6 +50,17 @@ final class DispatchService: ObservableObject {
         self.api = api
         self.now = now
         self.onUnauthorized = onUnauthorized
+        downloadState = ((try? repo.hasRoute()) == true) ? .downloaded : .notDownloaded
+        refreshPending()
+    }
+
+    /// Cambia a la base de OTRO usuario (★ aislamiento por usuario). Reapunta el repo al archivo
+    /// del usuario nuevo y LIMPIA el estado en memoria: nada de la ruta del anterior queda
+    /// visible. Estructural — un driver nunca ve la ruta de otro (ni entrega en su dirección).
+    func useDatabase(_ database: AppDatabase) {
+        repo = DriverRepository(database: database, now: now)
+        serverSummary = nil
+        loadError = nil
         downloadState = ((try? repo.hasRoute()) == true) ? .downloaded : .notDownloaded
         refreshPending()
     }

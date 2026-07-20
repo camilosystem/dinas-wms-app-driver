@@ -16,14 +16,23 @@ struct AppDatabase {
 
     // MARK: - Fábricas
 
-    /// Base compartida de la app, en Application Support.
-    static func makeShared() throws -> AppDatabase {
+    /// Base POR USUARIO, en Application Support. ★ Aislamiento estructural: cada driver tiene
+    /// su propio archivo → NUNCA ve la ruta de otro. En la calle eso no es confusión: es
+    /// entregar en la dirección equivocada. No depende de limpiar cache al cambiar de sesión.
+    static func makeForUser(_ username: String?) throws -> AppDatabase {
         let fm = FileManager.default
         let folder = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                 appropriateFor: nil, create: true)
-        let dbURL = folder.appendingPathComponent("dinas-driver.sqlite")
+        let dbURL = folder.appendingPathComponent(filename(forUser: username))
         let dbQueue = try DatabaseQueue(path: dbURL.path)
         return try AppDatabase(dbQueue)
+    }
+
+    /// Nombre de archivo por usuario, saneado (solo `[a-z0-9_-]`). `nil`/vacío → "invitado".
+    static func filename(forUser username: String?) -> String {
+        let raw = (username ?? "").lowercased()
+        let safe = String(raw.map { ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") ? $0 : "_" })
+        return "dinas-driver-\(safe.isEmpty ? "_guest" : safe).sqlite"
     }
 
     /// Base en memoria, para tests.

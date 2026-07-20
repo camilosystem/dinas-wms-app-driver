@@ -291,6 +291,34 @@ final class DriverTests: XCTestCase {
         XCTAssertEqual(api.finishCalls, 1)
         XCTAssertEqual(service.serverSummary?.deliveredCount, 1, "el resumen del server llegó")
     }
+
+    // MARK: - Aislamiento por usuario (★ un driver nunca ve la ruta de otro)
+
+    func test_archivoDeBase_esDistintoPorUsuario_ySaneado() {
+        XCTAssertNotEqual(AppDatabase.filename(forUser: "driver1"),
+                          AppDatabase.filename(forUser: "driver2"))
+        XCTAssertEqual(AppDatabase.filename(forUser: "Driver1"),
+                       AppDatabase.filename(forUser: "driver1"), "mismo usuario → mismo archivo")
+        XCTAssertEqual(AppDatabase.filename(forUser: nil), "dinas-driver-_guest.sqlite")
+        XCTAssertFalse(AppDatabase.filename(forUser: "a/b c").contains("/"))
+    }
+
+    func test_cambioDeUsuario_noDejaVerLaRutaDelAnterior() async throws {
+        // Usuario A: descargó su ruta.
+        let dbA = try AppDatabase.makeInMemory()
+        try DriverRepository(database: dbA).saveRoute(try makeRoute())
+        let service = DispatchService(database: dbA, api: StubDispatchAPI())
+        XCTAssertEqual(service.downloadState, .downloaded)
+        XCTAssertNotNil(try service.repo.routeHeader())
+
+        // Cambia al usuario B (otra base, sin ruta).
+        let dbB = try AppDatabase.makeInMemory()
+        service.useDatabase(dbB)
+        XCTAssertEqual(service.downloadState, .notDownloaded,
+                       "no queda ni la ruta del driver anterior (sin fuga)")
+        XCTAssertNil(try service.repo.routeHeader())
+        XCTAssertEqual(service.pendingCount, 0)
+    }
 }
 
 /// Stub de auth mínimo para el test de rol.
