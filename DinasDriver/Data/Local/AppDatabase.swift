@@ -132,6 +132,13 @@ struct AppDatabase {
             }
         }
 
+        // ★ v0.15.0 — idempotencia del retorno: uuid generado al crear, estable en reintentos.
+        migrator.registerMigration("v3_return_uuid") { db in
+            try db.alter(table: "pending_actions") { t in
+                t.add(column: "return_uuid", .text)
+            }
+        }
+
         return migrator
     }
 }

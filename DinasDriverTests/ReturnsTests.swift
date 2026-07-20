@@ -104,7 +104,7 @@ final class ReturnsTests: XCTestCase {
 
         let registro = Date(timeIntervalSince1970: 5000)   // hora de la visita
         try service.repo.enqueueReturn(
-            truckID: "TRK-1", clientCode: "C1",
+            truckID: "TRK-1", returnUUID: "RET-FIXED", clientCode: "C1",
             items: [ProductReturnItemInput(itemCode: "CANOA-01", itemName: "Canoa Frozen Mango Pulp",
                                            quantity: 3, reason: .danado),
                     ProductReturnItemInput(itemCode: "AREPA-99", itemName: "Arepa Tradicional 10u",
@@ -126,6 +126,7 @@ final class ReturnsTests: XCTestCase {
         XCTAssertEqual(req.clientCode, "C1")
         XCTAssertEqual(req.items.count, 2, "varios ítems en un retorno")
         XCTAssertEqual(req.occurredAt, registro, "occurred_at = hora de la visita, no la de sync")
+        XCTAssertEqual(req.returnUUID, "RET-FIXED", "manda el return_uuid guardado en la cola")
         XCTAssertFalse(req.photoBase64.isEmpty, "la foto viaja en base64")
         XCTAssertEqual(req.clientReference, "F-123")
         XCTAssertEqual(try service.repo.pendingCount(), 0)
@@ -134,5 +135,30 @@ final class ReturnsTests: XCTestCase {
         // Reintento: no duplica.
         await service.syncPending()
         XCTAssertEqual(api.returnCalls.count, 1, "el replay no duplica el retorno")
+    }
+
+    /// El `return_uuid` se genera al CREAR (registerReturn) y se guarda en la cola — NO al enviar.
+    /// Así el reintento (que reconstruye el request desde la cola) manda el MISMO uuid. Que el
+    /// uuid enviado sea el guardado y no duplique lo cubre `test_offline_...` (con "RET-FIXED").
+    func test_returnUUID_seGeneraAlCrear_ySeGuardaEnLaCola() throws {
+        let db = try AppDatabase.makeInMemory()
+        let photos = tempPhotoStore()
+        let api = StubDispatchAPI(); api.route = try makeRoute()
+        api.offline = true
+        let service = DispatchService(database: db, api: api, photos: photos)
+        try service.repo.saveRoute(api.route!)
+        let path = try photos.saveResized(from: makeJPEG(width: 1600, height: 1200))
+
+        let uuid = service.registerReturn(
+            truckID: "TRK-1", clientCode: "C1",
+            items: [ProductReturnItemInput(itemCode: "CANOA-01", itemName: "Canoa Frozen Mango Pulp",
+                                           quantity: 1, reason: .danado)],
+            note: nil, clientReference: nil, photoPath: path)
+
+        XCTAssertFalse(uuid.isEmpty)
+        let pending = try XCTUnwrap(try service.repo.pendingActions().first)
+        XCTAssertEqual(pending.kind, .productReturn)
+        XCTAssertEqual(pending.returnUUID, uuid,
+                       "el uuid se generó al crear y quedó en la cola (mismo en cada reintento)")
     }
 }

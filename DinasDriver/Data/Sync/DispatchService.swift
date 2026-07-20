@@ -122,15 +122,19 @@ final class DispatchService: ObservableObject {
         try photos.saveResized(from: imageData)
     }
 
-    /// Registra un RETORNO de producto. `occurred_at` se captura AQUÍ (hora de la visita). La
-    /// foto ya está en disco (photoPath); en la cola solo va su ruta.
+    /// Registra un RETORNO de producto. El `return_uuid` se GENERA AQUÍ (al crear, no al enviar) y
+    /// se guarda en la cola → el reintento manda el mismo y el servidor no duplica. `occurred_at`
+    /// se captura aquí (hora de la visita). La foto ya está en disco; en la cola solo va su ruta.
+    @discardableResult
     func registerReturn(truckID: String, clientCode: String, items: [ProductReturnItemInput],
-                        note: String?, clientReference: String?, photoPath: String) {
-        try? repo.enqueueReturn(truckID: truckID, clientCode: clientCode, items: items,
-                                note: note, clientReference: clientReference,
+                        note: String?, clientReference: String?, photoPath: String) -> String {
+        let returnUUID = UUID().uuidString
+        try? repo.enqueueReturn(truckID: truckID, returnUUID: returnUUID, clientCode: clientCode,
+                                items: items, note: note, clientReference: clientReference,
                                 photoPath: photoPath, occurredAt: now())
         refreshPending()
         Task { await syncPending() }
+        return returnUUID
     }
 
     // MARK: - Sincronización (replay idempotente)
@@ -178,15 +182,17 @@ final class DispatchService: ObservableObject {
             serverSummary = summary
         case .productReturn:
             guard let path = action.photoPath, let clientCode = action.clientCode,
-                  let items = action.returnItems, !items.isEmpty else {
+                  let items = action.returnItems, !items.isEmpty,
+                  let returnUUID = action.returnUUID else {
                 throw APIError.server(status: 400, message: "Retorno incompleto.")   // permanente → FAILED
             }
             guard FileManager.default.fileExists(atPath: path) else {
                 throw APIError.server(status: 400, message: "La foto del retorno ya no está en el teléfono.")
             }
             let base64 = try photos.base64(atPath: path)
+            // ★ Mismo return_uuid en cada reintento (viene de la cola) → idempotente.
             let request = SubmitReturnRequest(
-                clientCode: clientCode,
+                returnUUID: returnUUID, clientCode: clientCode,
                 items: items.map { .init(itemCode: $0.itemCode, quantity: $0.quantity, reason: $0.reason) },
                 photoBase64: base64, note: action.note, occurredAt: action.occurredAt,
                 clientReference: action.clientReference)

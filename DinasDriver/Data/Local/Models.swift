@@ -289,6 +289,9 @@ struct PendingAction: Codable, FetchableRecord, MutablePersistableRecord, Identi
     var returnItems: [ProductReturnItemInput]? = nil
     var clientReference: String? = nil
     var photoPath: String? = nil
+    /// ★ UUID del retorno, generado al CREARLO. Estable entre reintentos → el POST es
+    /// idempotente y no duplica.
+    var returnUUID: String? = nil
 
     static let databaseTableName = "pending_actions"
 
@@ -308,6 +311,7 @@ struct PendingAction: Codable, FetchableRecord, MutablePersistableRecord, Identi
         case returnItems = "return_items"
         case clientReference = "client_reference"
         case photoPath = "photo_path"
+        case returnUUID = "return_uuid"
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }

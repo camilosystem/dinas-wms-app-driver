@@ -41,9 +41,15 @@ info:
       fallar y dejar retornos sin evidencia.
       El middleware la guarda EN DISCO y conserva la ruta en la base.
 
-    ★ OFFLINE
+    ★ OFFLINE — con idempotencia explícita
       Se encola como todo lo demás. La foto se guarda local hasta que haya
       señal. `occurred_at` lleva la hora real de la visita.
+      ★ `return_uuid` lo GENERA LA APP y hace el POST idempotente. Es necesario
+      porque un retorno no tiene identidad natural (a diferencia de `deliver`,
+      cuya clave es el order_uuid): el mismo cliente puede devolver lo mismo dos
+      veces el mismo día. Sin esa clave, si el servidor procesa y la señal se
+      cae antes de que llegue la respuesta, el reintento crearía un DUPLICADO
+      con su foto. Con ella, el reintento devuelve 200 con el registro existente.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.14.0 — DESPACHO / APP DE DRIVER (Bloque 4A)
@@ -2517,8 +2523,22 @@ paths:
           application/json:
             schema:
               type: object
-              required: [client_code, items, photo_base64]
+              required: [return_uuid, client_code, items, photo_base64]
               properties:
+                return_uuid:
+                  type: string
+                  format: uuid
+                  description: >
+                    ★ v0.15.0 — Identidad del retorno, GENERADA POR LA APP.
+                    Hace el POST idempotente: si el servidor ya procesó este
+                    return_uuid, devuelve 200 con el registro existente en vez
+                    de crear un duplicado.
+                    Es necesario porque un retorno NO tiene identidad natural
+                    (a diferencia de `deliver`, cuya clave es el order_uuid):
+                    el mismo cliente puede devolver lo mismo dos veces el mismo
+                    día legítimamente. Sin esta clave, un reintento tras
+                    perderse la respuesta crearía un retorno duplicado con su
+                    foto.
                 client_code:
                   type: string
                   description: El cliente que devuelve. Debe ser una parada de su ruta.
@@ -2555,6 +2575,14 @@ paths:
       responses:
         '201':
           description: Retorno registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductReturn' }
+        '200':
+          description: >
+            ★ Este return_uuid YA fue procesado — devuelve el registro existente
+            sin crear un duplicado. Es la respuesta al reintento de una app que
+            no recibió la confirmación.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ProductReturn' }
@@ -3627,7 +3655,11 @@ components:
       description: >
         ★ v0.15.0 — Un retorno de producto registrado por un driver en ruta.
       properties:
-        return_id: { type: string, format: uuid }
+        return_id:
+          type: string
+          format: uuid
+          description: >
+            El `return_uuid` que generó la app. Es la identidad del retorno.
         truck_id: { type: string, format: uuid }
         truck_name: { type: string, nullable: true }
         driver_username: { type: string }

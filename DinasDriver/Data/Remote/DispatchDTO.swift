@@ -172,6 +172,9 @@ struct DeliveryRecord: Decodable {
 /// Cuerpo del retorno. TODO en una petición: o entra completo con su evidencia, o no entra.
 /// `photoBase64` = la foto YA redimensionada por la app, en base64 SIN prefijo data-uri.
 struct SubmitReturnRequest: Encodable {
+    /// ★ Lo GENERA la app al crear el retorno (no al enviar) y hace el POST idempotente: el
+    /// reintento manda el MISMO uuid → el servidor no duplica. Es la identidad del retorno.
+    let returnUUID: String
     let clientCode: String
     let items: [Item]
     let photoBase64: String
@@ -191,6 +194,7 @@ struct SubmitReturnRequest: Encodable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case returnUUID = "return_uuid"
         case clientCode = "client_code"
         case items
         case photoBase64 = "photo_base64"

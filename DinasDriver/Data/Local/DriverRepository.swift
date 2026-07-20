@@ -153,15 +153,16 @@ struct DriverRepository {
     /// Encola un RETORNO de producto. `photoPath` = ruta al JPEG en disco (la foto NO va a la
     /// BD). `occurredAt` = hora real de la visita (verbatim al replay). Cada retorno es una
     /// acción distinta (no se deduplica: el servidor asigna un return_id por POST).
-    func enqueueReturn(truckID: String, clientCode: String, items: [ProductReturnItemInput],
-                       note: String?, clientReference: String?, photoPath: String,
-                       occurredAt: Date) throws {
+    func enqueueReturn(truckID: String, returnUUID: String, clientCode: String,
+                       items: [ProductReturnItemInput], note: String?, clientReference: String?,
+                       photoPath: String, occurredAt: Date) throws {
         try database.dbQueue.write { db in
             var a = PendingAction(id: nil, truckID: truckID, kind: .productReturn, orderUUID: nil,
                                   orderReason: nil, rejectedItems: nil, note: note,
                                   occurredAt: occurredAt, createdAt: now(), status: .pending,
                                   errorMessage: nil, clientCode: clientCode, returnItems: items,
-                                  clientReference: clientReference, photoPath: photoPath)
+                                  clientReference: clientReference, photoPath: photoPath,
+                                  returnUUID: returnUUID)
             try a.insert(db)
         }
     }
