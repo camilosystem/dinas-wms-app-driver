@@ -30,7 +30,10 @@ struct CashBoxView: View {
                     Text("Aún no has recogido pagos.").foregroundStyle(.secondary)
                 }
                 ForEach(payments) { payment in
-                    PaymentRow(payment: payment)
+                    // Anular VISIBLE (botón en la fila) + también por swipe. El motivo es
+                    // obligatorio (lo pide la hoja).
+                    PaymentRow(payment: payment,
+                               onVoid: payment.isVoided ? nil : { voidTarget = payment })
                         .swipeActions {
                             if !payment.isVoided {
                                 Button("Anular", role: .destructive) { voidTarget = payment }
@@ -67,9 +70,11 @@ struct CashBoxView: View {
 
 private struct PaymentRow: View {
     let payment: Payment
+    /// Si no es nil, el pago se puede anular (no anulado aún) → botón visible.
+    var onVoid: (() -> Void)?
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(payment.clientName.isEmpty ? payment.clientCode : payment.clientName)
@@ -93,10 +98,20 @@ private struct PaymentRow: View {
                 }
             }
             Spacer()
-            Text(Fmt.money(payment.amount))
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(payment.isVoided ? .secondary : .primary)
-                .strikethrough(payment.isVoided)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(Fmt.money(payment.amount))
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(payment.isVoided ? .secondary : .primary)
+                    .strikethrough(payment.isVoided)
+                if let onVoid {
+                    Button(role: .destructive, action: onVoid) {
+                        Label("Anular", systemImage: "xmark.circle")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderless)   // el toque va al botón, no a la fila
+                    .tint(.red)
+                }
+            }
         }
         .padding(.vertical, 2)
     }
