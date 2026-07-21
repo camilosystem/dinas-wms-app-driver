@@ -65,5 +65,9 @@ final class AppEnvironment: ObservableObject {
                 dispatch?.useDatabase(db)
             }
         }
+
+        // ★ Al cerrar sesión, limpia el snapshot de ruta (conserva cola/pagos) → el siguiente
+        // login empieza limpio y no queda atrapado con la ruta vieja.
+        auth.onLogout = { [weak dispatch] in dispatch?.clearRoute() }
     }
 }

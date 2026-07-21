@@ -12,6 +12,8 @@ struct MyRouteView: View {
     /// Modo reordenar: mientras está activo se arrastra; apagado, las paradas se abren al tocar.
     @State private var reordering = false
     @State private var showLogoutConfirm = false
+    @State private var showRefreshWarning = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -45,7 +47,36 @@ struct MyRouteView: View {
             } message: {
                 Text("Incluye pagos. No se pierden — se enviarán cuando vuelvas a conectarte y abras la app. Mejor revisa antes de salir.")
             }
-            .task { model.attach(dispatch); model.reload() }
+            .confirmationDialog("Tienes \(dispatch.pendingCount) pendiente(s) sin sincronizar de la ruta anterior",
+                                isPresented: $showRefreshWarning, titleVisibility: .visible) {
+                Button("Sincronizar ahora") { Task { await dispatch.syncPending(); model.reload() } }
+                Button("Traer ruta nueva de todos modos", role: .destructive) {
+                    Task { await dispatch.downloadRoute(); model.reload() }
+                }
+                Button("Cancelar", role: .cancel) { }
+            } message: {
+                Text("Incluye pagos. Envíalos antes: una vez traes la ruta nueva, el camión anterior queda cerrado y podrían no poder registrarse.")
+            }
+            .task {
+                model.attach(dispatch); model.reload()
+                // ★ Si la ruta local está cerrada, verifica si el admin ya asignó una nueva.
+                await dispatch.checkForNewRouteIfClosed(); model.reload()
+            }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active {
+                    Task { await dispatch.checkForNewRouteIfClosed(); model.reload() }
+                }
+            }
+        }
+    }
+
+    /// "Actualizar ruta": si hay pendientes de la ruta anterior, avisa antes de reemplazar el
+    /// snapshot (no descartar trabajo sin sincronizar, sobre todo pagos). Si no, actualiza directo.
+    private func requestRefresh() {
+        if dispatch.pendingCount > 0 {
+            showRefreshWarning = true
+        } else {
+            Task { await dispatch.downloadRoute(); model.reload() }
         }
     }
 
@@ -85,7 +116,10 @@ struct MyRouteView: View {
                         }
                         Spacer()
                     }
-                    if header.startedAt == nil {
+                    if header.status == .rutaCerrada {
+                        Label("Ruta cerrada. Actualiza para traer una nueva.", systemImage: "flag.checkered")
+                            .font(.callout.weight(.semibold)).foregroundStyle(.orange)
+                    } else if header.startedAt == nil {
                         Button {
                             dispatch.startRoute(truckID: header.truckID); model.reload()
                         } label: {
@@ -97,6 +131,11 @@ struct MyRouteView: View {
                         Label("Ruta en curso", systemImage: "location.fill")
                             .font(.callout.weight(.semibold)).foregroundStyle(.green)
                     }
+                    // ★ Siempre disponible: traer/actualizar la ruta cuando el driver quiera.
+                    Button { requestRefresh() } label: {
+                        Label("Actualizar ruta", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(dispatch.isSyncing)
                 }
             }
 

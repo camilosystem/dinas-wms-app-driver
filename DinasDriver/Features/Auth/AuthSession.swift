@@ -183,6 +183,10 @@ final class AuthSession: ObservableObject {
         AppLog.auth.info("login verificado offline con contraseña")
     }
 
+    /// Se invoca al cerrar sesión (además de conservar la credencial). Se usa para LIMPIAR el
+    /// snapshot de ruta → el siguiente login empieza limpio. Conserva la cola/pagos.
+    var onLogout: () -> Void = {}
+
     /// Cierra sesión: la app vuelve al login, pero la credencial se conserva para poder
     /// re-loguearse OFFLINE con la contraseña (offline-first, decisión aprobada).
     func logout() {
@@ -195,6 +199,7 @@ final class AuthSession: ObservableObject {
         needsReauth = false
         loginFailure = nil
         state = .signedOut
+        onLogout()
     }
 
     /// La sesión expiró (401 durante el sync). NO borra la sesión: el vendedor sigue

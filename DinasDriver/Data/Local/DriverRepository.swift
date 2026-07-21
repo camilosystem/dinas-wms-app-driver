@@ -79,12 +79,40 @@ struct DriverRepository {
         try database.dbQueue.read { try RouteHeader.fetchOne($0) }
     }
 
+    /// ¿La ruta local está CERRADA (RUTA_CERRADA)? → conviene buscar una nueva.
+    func routeIsClosed() throws -> Bool {
+        try database.dbQueue.read { try RouteHeader.fetchOne($0)?.status == .rutaCerrada }
+    }
+
+    /// Borra el SNAPSHOT de ruta (cabecera, paradas, pedidos, catálogo, reorden local) para
+    /// arrancar limpio (logout). ★ CONSERVA `pending_actions` y `payments`: nunca se descarta
+    /// trabajo sin sincronizar — sobre todo el dinero.
+    func clearRouteSnapshot() throws {
+        try database.dbQueue.write { db in
+            try DriverOrder.deleteAll(db)
+            try DriverStop.deleteAll(db)
+            try CatalogItem.deleteAll(db)
+            try LocalStopOrder.deleteAll(db)
+            try RouteHeader.deleteAll(db)
+        }
+    }
+
     /// Marca localmente que la ruta se inició (optimista; el `start` real va en la cola).
     func markStartedLocally() throws {
         try database.dbQueue.write { db in
             guard var header = try RouteHeader.fetchOne(db) else { return }
             if header.startedAt == nil { header.startedAt = now() }
             header.status = .enRuta
+            try header.update(db)
+        }
+    }
+
+    /// Marca la ruta CERRADA localmente (optimista al terminar) → la app sabe que debe buscar una
+    /// nueva y ofrece "Actualizar ruta".
+    func markFinishedLocally() throws {
+        try database.dbQueue.write { db in
+            guard var header = try RouteHeader.fetchOne(db) else { return }
+            header.status = .rutaCerrada
             try header.update(db)
         }
     }

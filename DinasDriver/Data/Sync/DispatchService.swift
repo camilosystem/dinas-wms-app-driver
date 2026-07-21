@@ -70,17 +70,24 @@ final class DispatchService: ObservableObject {
 
     // MARK: - Descarga
 
-    /// Descarga la ruta y la guarda local. Requiere red. 404 → sin camión asignado.
+    /// ¿La ruta local está CERRADA? La app ofrece "Actualizar ruta" y auto-verifica una nueva.
+    var localRouteIsClosed: Bool { (try? repo.routeIsClosed()) ?? false }
+
+    /// Descarga/actualiza la ruta y la guarda local (★ conserva la cola). Requiere red. Se puede
+    /// llamar SIEMPRE (botón "Actualizar ruta"), no solo sin snapshot. 404 → sin camión asignado.
     func downloadRoute() async {
         loadError = nil
         do {
             let route = try await api.fetchMyRoute()
-            try repo.saveRoute(route)
+            try repo.saveRoute(route)   // reemplaza el snapshot; NO toca pending_actions ni payments
             downloadState = .downloaded
         } catch APIError.unauthorized {
             onUnauthorized()
         } catch let e as APIError where e.serverStatus == 404 {
-            downloadState = ((try? repo.hasRoute()) == true) ? .downloaded : .noRouteAssigned
+            // Sin camión: dilo claro. Solo se conserva la vista de ruta si la local está ACTIVA
+            // (no cerrada) — así una ruta cerrada + 404 muestra "no tienes ruta asignada".
+            let active = (try? repo.hasRoute()) == true && !localRouteIsClosed
+            downloadState = active ? .downloaded : .noRouteAssigned
         } catch {
             // Sin red: si ya había snapshot, se sigue trabajando; si no, queda el aviso.
             if (try? repo.hasRoute()) == true {
@@ -89,6 +96,21 @@ final class DispatchService: ObservableObject {
                 loadError = "No se pudo descargar la ruta. Conéctate e inténtalo de nuevo."
             }
         }
+    }
+
+    /// Verifica en el servidor si hay una RUTA NUEVA cuando la local está CERRADA (arranque/foreground).
+    func checkForNewRouteIfClosed() async {
+        if localRouteIsClosed { await downloadRoute() }
+    }
+
+    /// Limpia el SNAPSHOT de ruta (logout) para que el siguiente login empiece limpio. ★ CONSERVA
+    /// la cola y los pagos: nunca se descarta trabajo sin sincronizar.
+    func clearRoute() {
+        try? repo.clearRouteSnapshot()
+        downloadState = .notDownloaded
+        serverSummary = nil
+        loadError = nil
+        refreshPending()
     }
 
     // MARK: - Acciones (encolan optimista, nunca bloquean)
@@ -112,6 +134,7 @@ final class DispatchService: ObservableObject {
     }
 
     func finishRoute(truckID: String) {
+        try? repo.markFinishedLocally()   // ★ la ruta queda cerrada → se puede "Actualizar ruta"
         try? repo.enqueueFinishRoute(truckID: truckID)
         refreshPending()
         Task { await syncPending() }
