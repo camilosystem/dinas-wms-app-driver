@@ -139,6 +139,30 @@ struct AppDatabase {
             }
         }
 
+        // ★ v0.16.0 — PAGOS en ruta (Bloque 4C). Registro LOCAL DURABLE (fuente de la caja): el
+        // pago se guarda al instante y no se pierde; el envío se sincroniza aparte. Un pago es
+        // dinero → nada se borra: anular deja el rastro (is_voided/void_reason).
+        migrator.registerMigration("v4_payments") { db in
+            try db.create(table: "payments") { t in
+                t.primaryKey("payment_uuid", .text)
+                t.column("truck_id", .text).notNull()
+                t.column("client_code", .text).notNull()
+                t.column("client_name", .text).notNull().defaults(to: "")
+                t.column("amount", .double).notNull().defaults(to: 0)
+                t.column("payment_type", .text).notNull()
+                t.column("check_number", .text)
+                t.column("note", .text)
+                t.column("photo_path", .text)          // cheque: ruta al JPEG en disco
+                t.column("occurred_at", .datetime).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("is_voided", .boolean).notNull().defaults(to: false)
+                t.column("void_reason", .text)
+                t.column("voided_at", .datetime)
+                t.column("create_synced", .boolean).notNull().defaults(to: false)
+                t.column("void_synced", .boolean).notNull().defaults(to: false)
+            }
+        }
+
         return migrator
     }
 }

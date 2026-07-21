@@ -137,6 +137,36 @@ final class DispatchService: ObservableObject {
         return returnUUID
     }
 
+    // MARK: - Pagos (★ v0.16.0)
+
+    /// Registra un PAGO. El `payment_uuid` se GENERA AQUÍ (al crear, no al enviar) → el reintento
+    /// manda el mismo y el servidor no duplica el dinero. Se guarda al instante como registro local
+    /// durable (fuente de la caja) y se muestra hecho; el envío sincroniza sola. `occurred_at` = la
+    /// hora real. `photoPath` (cheque) ya está en disco.
+    @discardableResult
+    func registerPayment(truckID: String, clientCode: String, clientName: String, amount: Double,
+                         type: PaymentType, checkNumber: String?, note: String?,
+                         photoPath: String?) -> String {
+        let uuid = UUID().uuidString
+        let payment = Payment(paymentUUID: uuid, truckID: truckID, clientCode: clientCode,
+                              clientName: clientName, amount: amount, paymentType: type,
+                              checkNumber: checkNumber, note: note, photoPath: photoPath,
+                              occurredAt: now(), createdAt: now(), isVoided: false, voidReason: nil,
+                              voidedAt: nil, createSynced: false, voidSynced: false)
+        try? repo.insertPayment(payment)
+        refreshPending()
+        Task { await syncPending() }
+        return uuid
+    }
+
+    /// Anula un pago con MOTIVO. Nada se borra: queda marcado como anulado. Se puede anular en
+    /// cualquier momento (incluso ruta cerrada). Idempotente en el servidor.
+    func voidPayment(paymentUUID: String, reason: String) {
+        try? repo.voidPaymentLocally(paymentUUID: paymentUUID, reason: reason, at: now())
+        refreshPending()
+        Task { await syncPending() }
+    }
+
     // MARK: - Sincronización (replay idempotente)
 
     func syncPending() async {
@@ -160,6 +190,45 @@ final class DispatchService: ObservableObject {
             } catch {
                 // Transitorio: detener; el resto sigue en cola y se reintenta al reconectar.
                 break
+            }
+        }
+
+        // ★ Pagos (dinero → máxima robustez). El registro local NO se pierde: se sincroniza crear
+        // (idempotente por payment_uuid, borra la foto del cheque al lograrlo) y anular (idempotente).
+        for payment in (try? repo.paymentsNeedingSync()) ?? [] {
+            do {
+                if !payment.createSynced {
+                    var base64: String?
+                    if payment.paymentType == .cheque, let path = payment.photoPath {
+                        guard FileManager.default.fileExists(atPath: path) else {
+                            throw APIError.server(status: 400, message: "Falta la foto del cheque.")
+                        }
+                        base64 = try photos.base64(atPath: path)
+                    }
+                    let req = SubmitPaymentRequest(
+                        paymentUUID: payment.paymentUUID, clientCode: payment.clientCode,
+                        amount: payment.amount, paymentType: payment.paymentType,
+                        checkNumber: payment.checkNumber, photoBase64: base64,
+                        note: payment.note, occurredAt: payment.occurredAt)
+                    _ = try await api.submitPayment(req)
+                    try? repo.markPaymentCreateSynced(paymentUUID: payment.paymentUUID)
+                    if let path = payment.photoPath { photos.delete(atPath: path) }
+                }
+                if payment.isVoided && !payment.voidSynced {
+                    let req = VoidPaymentRequest(reason: payment.voidReason ?? "",
+                                                 occurredAt: payment.voidedAt ?? now())
+                    _ = try await api.voidPayment(paymentUUID: payment.paymentUUID, request: req)
+                    try? repo.markPaymentVoidSynced(paymentUUID: payment.paymentUUID)
+                }
+            } catch APIError.unauthorized {
+                onUnauthorized(); break
+            } catch let error as APIError where error.isPermanent {
+                // Permanente (400): NO se descarta un pago (es dinero). Queda visible como
+                // pendiente para que se note y se corrija; se salta al siguiente.
+                AppLog.api.error("pago \(payment.paymentUUID, privacy: .public) RECHAZADO: \(error.serverMessage ?? "", privacy: .public)")
+                continue
+            } catch {
+                break   // transitorio: reintenta luego
             }
         }
         refreshPending()
@@ -202,7 +271,9 @@ final class DispatchService: ObservableObject {
     }
 
     private func refreshPending() {
-        pendingCount = (try? repo.pendingCount()) ?? 0
+        let actions = (try? repo.pendingCount()) ?? 0
+        let payments = (try? repo.pendingPaymentsCount()) ?? 0   // ★ el dinero cuenta aquí
+        pendingCount = actions + payments
     }
 
     // MARK: - Derivaciones (reflejo de lo registrado; el estado real lo deriva el server)

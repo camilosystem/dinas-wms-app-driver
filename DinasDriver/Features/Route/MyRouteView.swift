@@ -11,6 +11,7 @@ struct MyRouteView: View {
     @State private var showReorderWarning = false
     /// Modo reordenar: mientras está activo se arrastra; apagado, las paradas se abren al tocar.
     @State private var reordering = false
+    @State private var showLogoutConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -31,8 +32,18 @@ struct MyRouteView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { SyncBadge() }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Salir") { auth.logout() }
+                    // ★ Guarda: no dejar "perder" pendientes (dinero incluido) sin darse cuenta.
+                    Button("Salir") {
+                        if dispatch.pendingCount > 0 { showLogoutConfirm = true } else { auth.logout() }
+                    }
                 }
+            }
+            .confirmationDialog("Tienes \(dispatch.pendingCount) registro(s) sin sincronizar",
+                                isPresented: $showLogoutConfirm, titleVisibility: .visible) {
+                Button("Cerrar sesión de todos modos", role: .destructive) { auth.logout() }
+                Button("Quedarme", role: .cancel) { }
+            } message: {
+                Text("Incluye pagos. No se pierden — se enviarán cuando vuelvas a conectarte y abras la app. Mejor revisa antes de salir.")
             }
             .task { model.attach(dispatch); model.reload() }
         }
@@ -119,6 +130,14 @@ struct MyRouteView: View {
             #endif
 
             Section {
+                NavigationLink { CollectPaymentView() } label: {
+                    Label("Recoger pago", systemImage: "dollarsign.circle")
+                        .foregroundStyle(model.header?.startedAt == nil ? Color.secondary : Color.primary)
+                }
+                .disabled(model.header?.startedAt == nil)
+                NavigationLink { CashBoxView() } label: {
+                    Label("Mi caja", systemImage: "tray.full")
+                }
                 NavigationLink { ReturnFlowView() } label: {
                     Label("Retorno de producto", systemImage: "arrow.uturn.backward.square")
                         .foregroundStyle(model.header?.startedAt == nil ? Color.secondary : Color.primary)

@@ -248,4 +248,85 @@ struct DriverRepository {
             try a.update(db)
         }
     }
+
+    // MARK: - Pagos (★ v0.16.0). Registro LOCAL DURABLE = fuente de la caja.
+
+    /// Guarda el pago al instante (no se pierde). El envío se sincroniza aparte.
+    func insertPayment(_ payment: Payment) throws {
+        try database.dbQueue.write { try payment.insert($0) }
+    }
+
+    /// Anula LOCALMENTE (deja el rastro; nada se borra). El void real se sincroniza aparte.
+    func voidPaymentLocally(paymentUUID: String, reason: String, at: Date) throws {
+        try database.dbQueue.write { db in
+            guard var p = try Payment
+                .filter(Column("payment_uuid").collating(.nocase) == paymentUUID).fetchOne(db) else { return }
+            p.isVoided = true
+            p.voidReason = reason
+            p.voidedAt = at
+            p.voidSynced = false
+            try p.update(db)
+        }
+    }
+
+    /// Todos los pagos de la caja (recientes primero), anulados incluidos (marcados).
+    func payments() throws -> [Payment] {
+        try database.dbQueue.read { try Payment.order(Column("created_at").desc).fetchAll($0) }
+    }
+
+    func payment(uuid: String) throws -> Payment? {
+        try database.dbQueue.read { db in
+            try Payment.filter(Column("payment_uuid").collating(.nocase) == uuid).fetchOne(db)
+        }
+    }
+
+    /// Pagos con algo sin sincronizar (crear o anular).
+    func paymentsNeedingSync() throws -> [Payment] {
+        try database.dbQueue.read { db in
+            try Payment.filter(Column("create_synced") == false
+                               || (Column("is_voided") == true && Column("void_synced") == false))
+                .order(Column("created_at")).fetchAll(db)
+        }
+    }
+
+    func markPaymentCreateSynced(paymentUUID: String) throws {
+        try database.dbQueue.write { db in
+            guard var p = try Payment
+                .filter(Column("payment_uuid").collating(.nocase) == paymentUUID).fetchOne(db) else { return }
+            p.createSynced = true
+            try p.update(db)
+        }
+    }
+
+    func markPaymentVoidSynced(paymentUUID: String) throws {
+        try database.dbQueue.write { db in
+            guard var p = try Payment
+                .filter(Column("payment_uuid").collating(.nocase) == paymentUUID).fetchOne(db) else { return }
+            p.voidSynced = true
+            try p.update(db)
+        }
+    }
+
+    /// Totales de la caja: separados CASH/CHEQUE; los ANULADOS no suman.
+    func cajaTotals() throws -> PaymentTotals {
+        try database.dbQueue.read { db in
+            let all = try Payment.fetchAll(db)
+            var t = PaymentTotals()
+            for p in all where !p.isVoided {
+                if p.paymentType == .cash { t.cash += p.amount } else { t.cheque += p.amount }
+                t.count += 1
+            }
+            t.voidedCount = all.filter(\.isVoided).count
+            return t
+        }
+    }
+
+    /// Cuántos pagos están sin sincronizar (para el indicador — dinero sin registro es grave).
+    func pendingPaymentsCount() throws -> Int {
+        try database.dbQueue.read { db in
+            try Payment.filter(Column("create_synced") == false
+                               || (Column("is_voided") == true && Column("void_synced") == false))
+                .fetchCount(db)
+        }
+    }
 }
