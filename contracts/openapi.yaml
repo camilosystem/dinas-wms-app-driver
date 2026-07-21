@@ -1,9 +1,47 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.15.0
+  version: 0.16.0
   description: >
     Contrato de la API del middleware Dinas WMS.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.16.0 — RECOGER PAGO (Bloque 4C) · cierra la app de driver
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ ESTE BLOQUE TOCA DINERO — merece más cuidado que los demás
+      Los otros bloques registran INFORMACIÓN; este registra DINERO RECIBIDO.
+      Un retorno perdido se reconstruye preguntándole al cliente; un pago
+      perdido significa que alguien entregó efectivo sin constancia, y eso puede
+      terminar en una acusación a un driver honesto.
+      De ahí las dos reglas duras:
+        · IDEMPOTENCIA obligatoria (payment_uuid generado por la app). Un pago
+          duplicado es tan malo como uno perdido.
+        · REGISTRO INMUTABLE: un pago NO se edita ni se borra. Si hubo error se
+          ANULA, dejando el rastro.
+
+    ★ QUÉ REGISTRA
+      Cliente (de SU ruta), monto, tipo (CASH o CHEQUE) y la hora real.
+      · CHEQUE: número de cheque + FOTO OBLIGATORIA (es un documento físico;
+        fotografiarlo protege al driver y a la empresa).
+      · CASH: sin foto (no hay documento que fotografiar).
+
+    ★ NO SE APLICA A FACTURAS
+      Es un monto suelto. El admin lo aplica después en SAP. Nada se escribe a
+      SAP desde aquí.
+
+    ★ ANULACIÓN CON RASTRO
+      El driver puede anular un pago mal registrado, con MOTIVO OBLIGATORIO.
+      El registro NO desaparece: queda como anulado, con quién, cuándo y por qué.
+      Se puede anular EN CUALQUIER MOMENTO, incluso con la ruta ya cerrada —
+      el error suele notarse al cuadrar la caja en la bodega.
+
+    ★ EL DRIVER VE SU CAJA
+      Total recogido en la ruta, separado por CASH y CHEQUE. Al terminar trae
+      ese dinero encima y necesita saber cuánto es.
+      Los anulados NO suman.
+
+    ★ OFFLINE igual que todo: se encola, `occurred_at` lleva la hora real.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.15.0 — RETORNO DE PRODUCTO (Bloque 4B)
@@ -607,6 +645,10 @@ tags:
     description: Despacho en la calle — la app del driver (Bloque 4A).
   - name: returns
     description: Retorno de producto desde la ruta (Bloque 4B).
+  - name: payments
+    description: Pagos recogidos en ruta (Bloque 4C).
+  - name: payments-admin
+    description: Pagos vistos por el admin (Bloque 4C).
   - name: returns-admin
     description: Retornos vistos por el admin (Bloque 4B).
 
@@ -2677,6 +2719,221 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /dispatch/payments:
+    post:
+      tags: [payments]
+      summary: Registrar un pago recibido en ruta
+      description: >
+        ★ v0.16.0 — REQUIERE rol DRIVER con camión EN_RUTA.
+
+        El driver recibe dinero del cliente durante la visita. Es un REGISTRO —
+        el admin lo aplica después en SAP; nada se escribe a SAP desde aquí.
+
+        Reglas:
+          · `payment_uuid` lo GENERA LA APP → idempotente. Si ya fue procesado,
+            devuelve 200 con el registro existente. Un pago duplicado es tan
+            grave como uno perdido.
+          · El `client_code` debe ser de una parada de SU ruta → 400 si no.
+          · `amount` > 0.
+          · CHEQUE: `check_number` y `photo_base64` OBLIGATORIOS.
+          · CASH: sin foto ni número de cheque (mandarlos → 400).
+          · `occurred_at` = la hora real de la visita.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payment_uuid, client_code, amount, payment_type]
+              properties:
+                payment_uuid:
+                  type: string
+                  format: uuid
+                  description: >
+                    ★ Identidad del pago, GENERADA POR LA APP. Hace el POST
+                    idempotente: un reintento tras perderse la respuesta
+                    devuelve el registro existente en vez de duplicar el dinero.
+                client_code:
+                  type: string
+                  description: El cliente que paga. Debe ser una parada de su ruta.
+                amount:
+                  type: number
+                  format: double
+                  description: El monto recibido. Debe ser > 0.
+                payment_type: { $ref: '#/components/schemas/PaymentType' }
+                check_number:
+                  type: string
+                  nullable: true
+                  description: OBLIGATORIO si payment_type es CHEQUE; ausente si CASH.
+                photo_base64:
+                  type: string
+                  nullable: true
+                  description: >
+                    La foto del cheque, en base64 sin prefijo data-uri, ya
+                    redimensionada por la app (~1024px, ~70%).
+                    OBLIGATORIA si CHEQUE; ausente si CASH.
+                note: { type: string, nullable: true }
+                occurred_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: Cuándo se recibió el dinero (hora real, no la de sync).
+      responses:
+        '201':
+          description: Pago registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '200':
+          description: >
+            Este payment_uuid YA fue procesado — devuelve el registro existente
+            sin duplicar.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '400':
+          description: >
+            Cliente que no es de su ruta; monto <= 0; CHEQUE sin número o sin
+            foto; CASH con número de cheque o foto; foto ilegible.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: El camión no está EN_RUTA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dispatch/payments/mine:
+    get:
+      tags: [payments]
+      summary: Los pagos que recogió el driver, con el total de su caja
+      description: >
+        ★ v0.16.0 — REQUIERE rol DRIVER.
+        Lo que lleva recogido en su ruta actual, con el total separado por CASH
+        y CHEQUE — al terminar trae ese dinero encima y necesita saber cuánto es.
+        Los ANULADOS aparecen marcados pero NO suman al total.
+        Sigue accesible con la ruta cerrada (para poder anular después).
+      responses:
+        '200':
+          description: Sus pagos y el total
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverPaymentSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /dispatch/payments/{payment_uuid}/void:
+    post:
+      tags: [payments]
+      summary: Anular un pago mal registrado
+      description: >
+        ★ v0.16.0 — REQUIERE rol DRIVER; el pago debe ser SUYO → 403.
+
+        ★ EL REGISTRO NO SE BORRA. Queda como anulado, con quién lo anuló,
+        cuándo y POR QUÉ. Un pago es dinero: nada desaparece, todo queda
+        auditable.
+
+        El MOTIVO es obligatorio — un pago anulado sin explicación es una
+        bandera roja que nadie puede resolver después.
+
+        Se puede anular EN CUALQUIER MOMENTO, incluso con la ruta ya cerrada:
+        el error suele notarse al cuadrar la caja en la bodega.
+
+        Anular dos veces el mismo pago → 200 (idempotente), sin cambiar el
+        motivo ni la hora del primer anulado.
+      parameters:
+        - name: payment_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  description: Por qué se anula. OBLIGATORIO.
+                occurred_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+      responses:
+        '200':
+          description: Pago anulado (o ya lo estaba)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '400':
+          description: Sin motivo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: El pago no es de este driver
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/payments:
+    get:
+      tags: [payments-admin]
+      summary: Pagos recibidos en ruta
+      description: >
+        ★ v0.16.0 — REQUIERE ADMIN. El dinero que los drivers recogieron.
+        El admin lo aplica en SAP manualmente.
+        Incluye los ANULADOS (marcados, con su motivo) — el rastro importa.
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Desde esta fecha (inclusive). Por defecto, hoy.
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Hasta esta fecha (inclusive). Por defecto, hoy.
+      responses:
+        '200':
+          description: Los pagos del período, con totales
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPaymentList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/payments/{payment_uuid}/photo:
+    get:
+      tags: [payments-admin]
+      summary: La foto del cheque
+      description: >
+        ★ v0.16.0 — REQUIERE ADMIN. Solo para pagos con CHEQUE.
+        404 si es CASH (no tiene foto).
+      parameters:
+        - name: payment_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: La imagen
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3705,6 +3962,106 @@ components:
         item_name: { type: string }
         quantity: { type: number, format: double }
         reason: { $ref: '#/components/schemas/ProductReturnReason' }
+
+    PaymentType:
+      type: string
+      enum: [CASH, CHEQUE]
+      description: >
+        ★ v0.16.0 — Cómo pagó el cliente.
+        CHEQUE exige número de cheque y FOTO; CASH no lleva ninguno de los dos.
+
+    Payment:
+      type: object
+      description: >
+        ★ v0.16.0 — Un pago recibido en ruta. Registro INMUTABLE: no se edita ni
+        se borra; si hubo error se ANULA dejando el rastro.
+      properties:
+        payment_uuid:
+          type: string
+          format: uuid
+          description: El uuid que generó la app. Es la identidad del pago.
+        truck_id: { type: string, format: uuid }
+        truck_name: { type: string, nullable: true }
+        driver_username: { type: string }
+        driver_name: { type: string, nullable: true }
+        client_code: { type: string }
+        client_name: { type: string }
+        amount: { type: number, format: double }
+        payment_type: { $ref: '#/components/schemas/PaymentType' }
+        check_number:
+          type: string
+          nullable: true
+          description: Solo para CHEQUE.
+        has_photo:
+          type: boolean
+          description: TRUE para CHEQUE (la foto es obligatoria), FALSE para CASH.
+        photo_url:
+          type: string
+          nullable: true
+          description: >
+            Ruta para pedir la imagen — GET /admin/payments/{uuid}/photo.
+            NULL para CASH. La foto NO viaja en este schema.
+        note: { type: string, nullable: true }
+        occurred_at:
+          type: string
+          format: date-time
+          description: Cuándo se recibió el dinero (hora real de la visita).
+        recorded_at:
+          type: string
+          format: date-time
+          description: Cuándo llegó al servidor.
+        is_voided:
+          type: boolean
+          description: >
+            ★ Si el pago fue ANULADO. El registro sigue existiendo — el rastro
+            importa. Los anulados NO suman a los totales.
+        voided_at: { type: string, format: date-time, nullable: true }
+        voided_by:
+          type: string
+          nullable: true
+          description: Quién lo anuló.
+        void_reason:
+          type: string
+          nullable: true
+          description: >
+            Por qué se anuló. Obligatorio al anular — un pago anulado sin
+            explicación es una bandera roja que nadie puede resolver después.
+
+    PaymentTotals:
+      type: object
+      description: Totales de un conjunto de pagos. Los ANULADOS no suman.
+      properties:
+        cash_total: { type: number, format: double }
+        cheque_total: { type: number, format: double }
+        grand_total: { type: number, format: double }
+        payment_count:
+          type: integer
+          description: Pagos válidos (sin contar los anulados).
+        voided_count: { type: integer }
+
+    DriverPaymentSummary:
+      type: object
+      description: >
+        ★ v0.16.0 — La caja del driver: lo que lleva recogido en su ruta.
+      properties:
+        truck_id: { type: string, format: uuid }
+        truck_name: { type: string, nullable: true }
+        totals: { $ref: '#/components/schemas/PaymentTotals' }
+        payments:
+          type: array
+          description: Sus pagos, incluidos los anulados (marcados).
+          items: { $ref: '#/components/schemas/Payment' }
+
+    AdminPaymentList:
+      type: object
+      description: ★ v0.16.0 — Los pagos que ve el admin, con totales.
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        totals: { $ref: '#/components/schemas/PaymentTotals' }
+        payments:
+          type: array
+          items: { $ref: '#/components/schemas/Payment' }
 
     TruckStatus:
       type: string
