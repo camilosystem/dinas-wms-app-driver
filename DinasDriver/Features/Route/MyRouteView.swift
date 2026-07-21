@@ -20,10 +20,19 @@ struct MyRouteView: View {
             Group {
                 switch dispatch.downloadState {
                 case .noRouteAssigned:
-                    ContentUnavailableViewCompat(
-                        title: "No tienes ruta asignada",
-                        message: "Cuando la oficina te asigne un camión, aparecerá aquí.",
-                        systemImage: "truck.box")
+                    VStack(spacing: 16) {
+                        Image(systemName: "truck.box").font(.system(size: 48)).foregroundStyle(.secondary)
+                        Text("No tienes ruta asignada")
+                            .font(.title3.weight(.semibold)).multilineTextAlignment(.center)
+                        Text("Cuando la oficina te asigne un camión, toca Actualizar para traerlo.")
+                            .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Button { requestRefresh() } label: {
+                            Label("Actualizar ruta", systemImage: "arrow.clockwise")
+                                .font(.title3.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 4)
+                        }
+                        .buttonStyle(.borderedProminent).disabled(dispatch.isSyncing)
+                    }
+                    .padding(28)
                 case .notDownloaded:
                     notDownloaded
                 case .downloaded:
@@ -32,6 +41,14 @@ struct MyRouteView: View {
             }
             .navigationTitle("Mi ruta")
             .toolbar {
+                // ★ SIEMPRE presente (todos los estados): traer/actualizar la ruta cuando el
+                // driver quiera. No depende de que la app "crea" que hace falta.
+                ToolbarItem(placement: .primaryAction) {
+                    Button { requestRefresh() } label: {
+                        Label("Actualizar ruta", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(dispatch.isSyncing)
+                }
                 ToolbarItem(placement: .primaryAction) { SyncBadge() }
                 ToolbarItem(placement: .cancellationAction) {
                     // ★ Guarda: no dejar "perder" pendientes (dinero incluido) sin darse cuenta.
@@ -117,8 +134,15 @@ struct MyRouteView: View {
                         Spacer()
                     }
                     if header.status == .rutaCerrada {
-                        Label("Ruta cerrada. Actualiza para traer una nueva.", systemImage: "flag.checkered")
+                        Label("Ruta cerrada.", systemImage: "flag.checkered")
                             .font(.callout.weight(.semibold)).foregroundStyle(.orange)
+                        // Acción prominente para traer la ruta nueva (además del toolbar).
+                        Button { requestRefresh() } label: {
+                            Label("Actualizar ruta", systemImage: "arrow.clockwise")
+                                .font(.title3.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 4)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(dispatch.isSyncing)
                     } else if header.startedAt == nil {
                         Button {
                             dispatch.startRoute(truckID: header.truckID); model.reload()
@@ -131,11 +155,6 @@ struct MyRouteView: View {
                         Label("Ruta en curso", systemImage: "location.fill")
                             .font(.callout.weight(.semibold)).foregroundStyle(.green)
                     }
-                    // ★ Siempre disponible: traer/actualizar la ruta cuando el driver quiera.
-                    Button { requestRefresh() } label: {
-                        Label("Actualizar ruta", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(dispatch.isSyncing)
                 }
             }
 
