@@ -4,5 +4,5 @@
 APP_DISPLAY_NAME = Dinas Driver
 PRODUCT_BUNDLE_IDENTIFIER = com.dinas.driver
 
-// ⚠️ PLACEHOLDER — confirmar la URL real de producción (el contrato usa este host).
-MIDDLEWARE_BASE_URL = https:/$()/api.dinas-wms.example.com/v1
+// Producción real (HTTPS). El truco /$()/ evita que // se lea como comentario.
+MIDDLEWARE_BASE_URL = https:/$()/wms-api.dinascorp.com/v1

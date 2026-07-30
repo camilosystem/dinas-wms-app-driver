@@ -132,10 +132,25 @@ add_staging(tests, project)
 
 project.save
 
+# Esquema de DESARROLLO (default de Cmd+R): Run/Test en Debug → Dev.xcconfig.
 scheme = Xcodeproj::XCScheme.new
 scheme.add_build_target(app)
 scheme.set_launch_target(app)
 scheme.add_test_target(tests)
 scheme.save_as(PROJECT_PATH, 'DinasDriver', true)
+
+# Esquema de PRODUCCIÓN — opción APARTE y seleccionable, NO el default. Todas sus acciones usan
+# la configuración Release (→ Prod.xcconfig: HTTPS a wms-api.dinascorp.com). El scheme de dev
+# de arriba queda intacto, así que Cmd+R diario sigue apuntando a Dev.
+prod = Xcodeproj::XCScheme.new
+prod.add_build_target(app)
+prod.set_launch_target(app)
+prod.add_test_target(tests)
+prod.launch_action.build_configuration = 'Release'
+prod.test_action.build_configuration = 'Release'
+prod.profile_action.build_configuration = 'Release'
+prod.analyze_action.build_configuration = 'Release'
+prod.archive_action.build_configuration = 'Release'
+prod.save_as(PROJECT_PATH, 'DinasDriver (Prod)', true)
 
 puts "Generado #{PROJECT_PATH}"
