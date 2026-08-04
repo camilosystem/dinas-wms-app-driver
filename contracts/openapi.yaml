@@ -77,10 +77,13 @@ info:
       CARRITO:
       - OrderLine gana promotion_group_id (nullable UUID) — todas las
         líneas del mismo bloque de promoción (condición + beneficio)
-        comparten el mismo UUID. El servidor valida que el bloque sea
-        completo y rechaza (400) pedidos donde se eliminen solo ALGUNAS
-        líneas de un mismo grupo (el bloque es indivisible — se agrega
-        y se elimina en conjunto).
+        comparten el mismo valor. Ese valor ES el promotion_id de la
+        promoción, NO un UUID nuevo generado por el cliente (ver la
+        descripción del campo en OrderLine — corregido en v0.29.0, el
+        texto original de v0.28.0 era ambiguo). El servidor valida que
+        el bloque sea completo y rechaza (400) pedidos donde se
+        eliminen solo ALGUNAS líneas de un mismo grupo (el bloque es
+        indivisible — se agrega y se elimina en conjunto).
 
       TIPOS DE PROMOCIÓN:
       - FREE_ITEMS: los ítems de beneficio tienen discount_pct=100.
@@ -7225,12 +7228,26 @@ components:
           format: uuid
           nullable: true
           description: >
-            ★ v0.28.0. Si esta línea pertenece a un bloque de promoción,
-            todas las líneas del mismo bloque (condición + beneficio)
-            comparten el mismo promotion_group_id. El servidor rechaza
-            (400) un pedido donde se eliminen solo ALGUNAS líneas de un
-            mismo grupo (el bloque es indivisible — se agrega y se
-            elimina completo). Null para líneas normales sin promoción.
+            ★ v0.28.0, ACLARADO en v0.29.0. Si esta línea pertenece a un
+            bloque de promoción, todas las líneas del mismo bloque
+            (condición + beneficio) comparten el mismo
+            promotion_group_id. Null para líneas normales sin promoción.
+
+            ⚠️ EL VALOR DEBE SER EL promotion_id DE LA PROMOCIÓN — no un
+            UUID nuevo generado por el cliente. El tipo es uuid porque
+            promotion_id lo es, no porque haya que inventar uno. Un UUID
+            generado por el cliente se rechaza con 400
+            (code=invalid_promotion): "El promotion_group_id no
+            corresponde a ninguna promoción".
+
+            La redacción original de v0.28.0 no lo decía y se prestaba a
+            leerlo como un identificador de agrupación arbitrario; esa
+            ambigüedad causó una implementación equivocada en un cliente
+            (ya corregida) y se aclara acá de forma explícita.
+
+            El servidor rechaza (400, code=invalid_promotion) un pedido
+            donde se eliminen solo ALGUNAS líneas de un mismo grupo: el
+            bloque es indivisible, se agrega y se elimina completo.
 
     OrderAccepted:
       type: object
