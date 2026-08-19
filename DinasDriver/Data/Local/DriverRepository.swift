@@ -172,15 +172,40 @@ struct DriverRepository {
         try database.dbQueue.read { db in try DriverPickup.fetchAll(db) }
     }
 
-    /// ¿Esta recogida ya se registró LOCALMENTE (recogida o no-recogida encolada), sin esperar al
-    /// servidor? Sin esto, offline el `pickup_status` descargado sigue diciendo EN_CAMION y el driver
-    /// registraría dos veces. Cuenta acciones PENDING (aún no confirmadas ni rechazadas).
+    /// ¿Esta recogida está encolada y aún ESPERANDO (pending), sin esperar al servidor? Sin esto,
+    /// offline el `pickup_status` descargado sigue diciendo EN_CAMION y el driver registraría dos
+    /// veces. Cuenta solo PENDING: una acción RECHAZADA (`.failed`) NO cuenta → la marca se libera y
+    /// la recogida se vuelve a ofrecer (ver `failedPickupAction` para mostrar el porqué).
     func pickupRegisteredLocally(requestUUID: String) throws -> Bool {
         try database.dbQueue.read { db in
             try PendingAction
                 .filter(Column("pickup_for_request_uuid").collating(.nocase) == requestUUID
                         && Column("status") == PendingActionStatus.pending.rawValue)
                 .fetchCount(db) > 0
+        }
+    }
+
+    /// La última acción de esta recogida que el servidor RECHAZÓ de forma permanente (`.failed`). Su
+    /// `errorMessage` es lo que el driver tiene que ver: el registro no llegó y por qué. `nil` si no
+    /// hay rechazo (nunca se intentó, o está pendiente, o se resolvió).
+    func failedPickupAction(requestUUID: String) throws -> PendingAction? {
+        try database.dbQueue.read { db in
+            try PendingAction
+                .filter(Column("pickup_for_request_uuid").collating(.nocase) == requestUUID
+                        && Column("status") == PendingActionStatus.failed.rawValue)
+                .order(Column("created_at").desc)
+                .fetchOne(db)
+        }
+    }
+
+    /// Refleja localmente que la recogida se resolvió al sincronizar OK (RECOGIDA / NO_RECOGIDA),
+    /// para NO re-ofrecerla entre el éxito y el próximo refresco de ruta (el `pickup_status`
+    /// descargado sigue EN_CAMION hasta entonces). Optimista, igual que el reflejo del `deliver`.
+    func markPickupResolvedLocally(requestUUID: String, status: String) throws {
+        try database.dbQueue.write { db in
+            guard var p = try DriverPickup.fetchOne(db, key: requestUUID) else { return }
+            p.pickupStatus = status
+            try p.update(db)
         }
     }
 

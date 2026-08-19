@@ -8,8 +8,8 @@ struct StopView: View {
     @State private var orders: [DriverOrder] = []
     @State private var pendingByOrder: [String: PendingAction] = [:]
     @State private var pickups: [DriverPickup] = []
-    /// request_uuid de las recogidas YA registradas localmente (encoladas, sin esperar al servidor).
-    @State private var registeredPickups: Set<String> = []
+    /// Estado local por recogida (pendiente / resuelta / rechazada / a ofrecer).
+    @State private var pickupStates: [String: PickupUIState] = [:]
 
     var body: some View {
         List {
@@ -60,7 +60,7 @@ struct StopView: View {
                 Section("Recogida") {
                     ForEach(pickups) { pickup in
                         PickupRow(pickup: pickup, clientName: stop.clientName,
-                                  registeredLocally: registeredPickups.contains(pickup.requestUUID))
+                                  state: pickupStates[pickup.requestUUID] ?? .offer)
                     }
                 }
             }
@@ -77,10 +77,29 @@ struct StopView: View {
         pendingByOrder = Dictionary(pending.compactMap { a in a.orderUUID.map { ($0.lowercased(), a) } },
                                     uniquingKeysWith: { a, _ in a })
         pickups = (try? dispatch.repo.pickups(forClient: stop.clientCode)) ?? []
-        registeredPickups = Set(pickups
-            .filter { (try? dispatch.repo.pickupRegisteredLocally(requestUUID: $0.requestUUID)) ?? false }
-            .map(\.requestUUID))
+        pickupStates = Dictionary(uniqueKeysWithValues: pickups.map { ($0.requestUUID, state(for: $0)) })
     }
+
+    /// Precedencia: pendiente (encolada) > resuelta (server o reflejo local) > rechazada > ofrecer.
+    /// Un rechazo permanente NO deja la recogida pendiente: se re-ofrece Y se muestra por qué.
+    private func state(for pickup: DriverPickup) -> PickupUIState {
+        if (try? dispatch.repo.pickupRegisteredLocally(requestUUID: pickup.requestUUID)) == true {
+            return .pending
+        }
+        if pickup.isResolvedByServer { return .resolved }
+        if let action = try? dispatch.repo.failedPickupAction(requestUUID: pickup.requestUUID) {
+            return .failed(action.errorMessage ?? "El servidor rechazó el registro.")
+        }
+        return .offer
+    }
+}
+
+/// Estado local de una recogida en la parada.
+enum PickupUIState: Equatable {
+    case offer          // hay que registrarla
+    case pending        // encolada, esperando red (marca local anti-doble-registro)
+    case resolved       // ya cerrada (server o reflejo local del éxito)
+    case failed(String) // el servidor la RECHAZÓ de forma permanente — se re-ofrece + se dice por qué
 }
 
 /// Fila de una recogida: la instrucción de la oficina, lo esperado (referencia) y las dos salidas
@@ -88,9 +107,7 @@ struct StopView: View {
 private struct PickupRow: View {
     let pickup: DriverPickup
     let clientName: String
-    let registeredLocally: Bool
-
-    private var resolved: Bool { registeredLocally || pickup.isResolvedByServer }
+    let state: PickupUIState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -113,25 +130,41 @@ private struct PickupRow: View {
                 }
             }
 
-            if resolved {
-                Label(registeredLocally ? "Registrada. Se sincroniza sola." : "Recogida cerrada.",
-                      systemImage: "checkmark.seal.fill")
+            switch state {
+            case .pending:
+                Label("Registrada. Se sincroniza sola.", systemImage: "checkmark.seal.fill")
                     .font(.callout.weight(.semibold)).foregroundStyle(.green)
-            } else {
-                NavigationLink {
-                    ReturnFlowView(mode: .pickup(pickup, clientName: clientName))
-                } label: {
-                    Label("Registrar recogida", systemImage: "camera.fill")
+            case .resolved:
+                Label("Recogida cerrada.", systemImage: "checkmark.seal.fill")
+                    .font(.callout.weight(.semibold)).foregroundStyle(.green)
+            case .failed(let reason):
+                // El registro se perdió: el driver TIENE que verlo antes de bajarse del camión.
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("El registro no llegó. Hay que rehacerlo.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout.weight(.bold)).foregroundStyle(.red)
+                    Text(reason).font(.caption).foregroundStyle(.red)
                 }
-                NavigationLink {
-                    PickupNotCollectedView(pickup: pickup)
-                } label: {
-                    Label("No se pudo recoger", systemImage: "xmark.circle")
-                        .foregroundStyle(.orange)
-                }
+                actions   // se re-ofrece
+            case .offer:
+                actions
             }
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        NavigationLink {
+            ReturnFlowView(mode: .pickup(pickup, clientName: clientName))
+        } label: {
+            Label("Registrar recogida", systemImage: "camera.fill")
+        }
+        NavigationLink {
+            PickupNotCollectedView(pickup: pickup)
+        } label: {
+            Label("No se pudo recoger", systemImage: "xmark.circle")
+                .foregroundStyle(.orange)
+        }
     }
 }
 

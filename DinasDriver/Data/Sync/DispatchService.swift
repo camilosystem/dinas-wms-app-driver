@@ -217,6 +217,13 @@ final class DispatchService: ObservableObject {
             do {
                 try await send(action)
                 try? repo.deleteAction(id: id)
+                // ★ v0.45.0 — al lograrlo, refleja localmente la recogida resuelta para no
+                // re-ofrecerla antes del próximo refresco de ruta (cierra la ventana del éxito).
+                if let req = action.pickupForRequestUUID {
+                    try? repo.markPickupResolvedLocally(
+                        requestUUID: req,
+                        status: action.kind == .pickupNotCollected ? "NO_RECOGIDA" : "RECOGIDA")
+                }
             } catch APIError.unauthorized {
                 onUnauthorized()
                 break

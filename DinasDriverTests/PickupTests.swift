@@ -127,6 +127,73 @@ final class PickupTests: XCTestCase {
                       "encolada sin señal: la marca LOCAL evita registrarla dos veces")
     }
 
+    // 6 ─ Rechazo PERMANENTE (400): la marca se libera → se re-ofrece, Y el driver ve por qué.
+    func test_recogidaRechazadaPermanente_seReofrece_yElDriverVeElPorque() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let api = StubDispatchAPI(); api.route = try makePickupOnlyRoute()
+        let service = makeService(db, api)
+        try service.repo.saveRoute(api.route!)
+        let path = try service.photos.saveResized(from: try tinyJPEG())
+
+        api.offline = true   // se registra sin señal
+        service.registerReturn(kind: .pickup(requestUUID: "REQ-1"), truckID: "TRK-1", clientCode: "C9",
+                               items: [ProductReturnItemInput(itemCode: "CANOA-01", itemName: "Canoa Mango",
+                                                              quantity: 3, reason: .danado)],
+                               note: nil, clientReference: nil, photoPath: path)
+        XCTAssertTrue(try service.repo.pickupRegisteredLocally(requestUUID: "REQ-1"), "encolada")
+
+        // La oficina la desmontó mientras el driver iba: el servidor rechaza de forma permanente.
+        api.offline = false
+        api.permanentError = .server(status: 400, message: "Esta recogida ya no está en tu camión")
+        await service.syncPending()
+
+        XCTAssertFalse(try service.repo.pickupRegisteredLocally(requestUUID: "REQ-1"),
+                       "un rechazo permanente LIBERA la marca: la recogida se vuelve a ofrecer")
+        let failed = try XCTUnwrap(try service.repo.failedPickupAction(requestUUID: "REQ-1"))
+        XCTAssertEqual(failed.errorMessage, "Esta recogida ya no está en tu camión",
+                       "el driver ve por qué: el registro no llegó, con las palabras del servidor")
+    }
+
+    // 7 ─ El PAR NEGATIVO: un fallo de RED (transitorio) NO libera la marca.
+    func test_recogidaFalloDeRed_noLiberaLaMarca_yEsperaEnLaCola() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let api = StubDispatchAPI(); api.route = try makePickupOnlyRoute()
+        let service = makeService(db, api)
+        try service.repo.saveRoute(api.route!)
+        let path = try service.photos.saveResized(from: try tinyJPEG())
+
+        api.offline = true   // timeout / sin señal = transitorio, NO un rechazo
+        service.registerReturn(kind: .pickup(requestUUID: "REQ-1"), truckID: "TRK-1", clientCode: "C9",
+                               items: [ProductReturnItemInput(itemCode: "CANOA-01", itemName: "Canoa Mango",
+                                                              quantity: 3, reason: .danado)],
+                               note: nil, clientReference: nil, photoPath: path)
+        await service.syncPending()   // sigue offline
+
+        XCTAssertTrue(try service.repo.pickupRegisteredLocally(requestUUID: "REQ-1"),
+                      "sin señal no es rechazo: la marca queda puesta y la acción espera en la cola")
+        XCTAssertNil(try service.repo.failedPickupAction(requestUUID: "REQ-1"),
+                     "un transitorio no es un fallo permanente")
+    }
+
+    // 8 ─ Éxito: se refleja resuelta local → no se re-ofrece antes del refresco de ruta.
+    func test_recogidaSincronizadaOK_seReflejaResuelta() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let api = StubDispatchAPI(); api.route = try makePickupOnlyRoute()
+        let service = makeService(db, api)
+        try service.repo.saveRoute(api.route!)
+        let path = try service.photos.saveResized(from: try tinyJPEG())
+
+        service.registerReturn(kind: .pickup(requestUUID: "REQ-1"), truckID: "TRK-1", clientCode: "C9",
+                               items: [ProductReturnItemInput(itemCode: "CANOA-01", itemName: "Canoa Mango",
+                                                              quantity: 3, reason: .danado)],
+                               note: nil, clientReference: nil, photoPath: path)
+        await service.syncPending()   // OK → borra la acción de la cola
+
+        let pickup = try XCTUnwrap(try service.repo.pickups(forClient: "C9").first)
+        XCTAssertTrue(pickup.isResolvedByServer,
+                      "tras el éxito la recogida queda RECOGIDA local → no se re-ofrece hasta el refresco")
+    }
+
     /// JPEG de prueba para la foto obligatoria (con algo de detalle; el contenido no importa acá).
     private func tinyJPEG() throws -> Data {
         let w = 800, h = 600
