@@ -150,7 +150,7 @@ final class ReturnsTests: XCTestCase {
         let path = try photos.saveResized(from: makeJPEG(width: 1600, height: 1200))
 
         let uuid = service.registerReturn(
-            truckID: "TRK-1", clientCode: "C1",
+            kind: .spontaneous, truckID: "TRK-1", clientCode: "C1",
             items: [ProductReturnItemInput(itemCode: "CANOA-01", itemName: "Canoa Frozen Mango Pulp",
                                            quantity: 1, reason: .danado)],
             note: nil, clientReference: nil, photoPath: path)

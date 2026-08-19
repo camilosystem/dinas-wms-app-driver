@@ -257,6 +257,7 @@ enum PendingActionKind: String, Codable {
     case deliver = "DELIVER"             // registrar la entrega de un pedido (idempotente por pedido)
     case finishRoute = "FINISH_ROUTE"    // cerrar la ruta (singleton por camión)
     case productReturn = "PRODUCT_RETURN" // ★ v0.15.0 — retorno de producto (con foto en disco)
+    case pickupNotCollected = "PICKUP_NOT_COLLECTED" // ★ v0.45.0 — recogida que no se pudo hacer
 }
 
 enum PendingActionStatus: String, Codable {
@@ -292,6 +293,13 @@ struct PendingAction: Codable, FetchableRecord, MutablePersistableRecord, Identi
     /// ★ UUID del retorno, generado al CREARLO. Estable entre reintentos → el POST es
     /// idempotente y no duplica.
     var returnUUID: String? = nil
+    /// ★ v0.45.0 — Si esta acción es la RECOGIDA de una solicitud: la solicitud que mandó a buscar
+    /// la mercancía. En un PRODUCT_RETURN viaja como `pickup_for_request_uuid` (NO `credit_request_uuid`,
+    /// que es el enlace opuesto); en un PICKUP_NOT_COLLECTED es el `request_uuid` de la ruta. También
+    /// es la marca LOCAL anti-doble-registro: si hay una acción pendiente con este valor, ya se registró.
+    var pickupForRequestUUID: String? = nil
+    /// ★ v0.45.0 — Motivo de un PICKUP_NOT_COLLECTED.
+    var pickupNotCollectedReason: PickupNotCollectedReason? = nil
 
     static let databaseTableName = "pending_actions"
 
@@ -312,6 +320,8 @@ struct PendingAction: Codable, FetchableRecord, MutablePersistableRecord, Identi
         case clientReference = "client_reference"
         case photoPath = "photo_path"
         case returnUUID = "return_uuid"
+        case pickupForRequestUUID = "pickup_for_request_uuid"
+        case pickupNotCollectedReason = "pickup_not_collected_reason"
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }

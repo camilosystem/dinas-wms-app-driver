@@ -148,16 +148,30 @@ final class DispatchService: ObservableObject {
     /// Registra un RETORNO de producto. El `return_uuid` se GENERA AQUÍ (al crear, no al enviar) y
     /// se guarda en la cola → el reintento manda el mismo y el servidor no duplica. `occurred_at`
     /// se captura aquí (hora de la visita). La foto ya está en disco; en la cola solo va su ruta.
+    /// `kind` es OBLIGATORIO: `.spontaneous` o `.pickup(requestUUID:)`. No hay default — el
+    /// compilador no deja registrar una recogida como si fuera una devolución suelta (★ v0.45.0).
     @discardableResult
-    func registerReturn(truckID: String, clientCode: String, items: [ProductReturnItemInput],
+    func registerReturn(kind: ReturnKind, truckID: String, clientCode: String,
+                        items: [ProductReturnItemInput],
                         note: String?, clientReference: String?, photoPath: String) -> String {
         let returnUUID = UUID().uuidString
         try? repo.enqueueReturn(truckID: truckID, returnUUID: returnUUID, clientCode: clientCode,
                                 items: items, note: note, clientReference: clientReference,
-                                photoPath: photoPath, occurredAt: now())
+                                photoPath: photoPath, occurredAt: now(),
+                                pickupForRequestUUID: kind.pickupForRequestUUID)
         refreshPending()
         Task { await syncPending() }
         return returnUUID
+    }
+
+    /// Declara que una recogida NO se pudo hacer (★ v0.45.0). Se encola y se muestra hecho al
+    /// instante (marca local); `occurred_at` = hora de la visita. Idempotente.
+    func registerPickupNotCollected(truckID: String, requestUUID: String,
+                                    reason: PickupNotCollectedReason, note: String?) {
+        try? repo.enqueuePickupNotCollected(truckID: truckID, requestUUID: requestUUID,
+                                            reason: reason, note: note, occurredAt: now())
+        refreshPending()
+        Task { await syncPending() }
     }
 
     // MARK: - Pagos (★ v0.16.0)
@@ -287,9 +301,18 @@ final class DispatchService: ObservableObject {
                 returnUUID: returnUUID, clientCode: clientCode,
                 items: items.map { .init(itemCode: $0.itemCode, quantity: $0.quantity, reason: $0.reason) },
                 photoBase64: base64, note: action.note, occurredAt: action.occurredAt,
-                clientReference: action.clientReference)
+                clientReference: action.clientReference,
+                pickupForRequestUUID: action.pickupForRequestUUID)   // ★ v0.45.0 — nil si es espontánea
             _ = try await api.submitReturn(request)
             photos.delete(atPath: path)   // ★ borra la foto del teléfono al sincronizar
+        case .pickupNotCollected:
+            guard let requestUUID = action.pickupForRequestUUID,
+                  let reason = action.pickupNotCollectedReason else {
+                throw APIError.server(status: 400, message: "Recogida no realizada incompleta.")
+            }
+            let request = PickupNotCollectedRequest(reason: reason, note: action.note,
+                                                    occurredAt: action.occurredAt)
+            _ = try await api.notCollectedPickup(requestUUID: requestUUID, request: request)
         }
     }
 

@@ -163,6 +163,27 @@ struct AppDatabase {
             }
         }
 
+        // ★ v0.45.0 — RECOGIDAS (una solicitud de crédito convertida en parada de recogida). Se
+        // guardan en la descarga para bastarse offline. En pending_actions: `pickup_for_request_uuid`
+        // marca que un PRODUCT_RETURN es en realidad la recogida de esa solicitud (y sirve de marca
+        // local anti-doble-registro); `pickup_not_collected_reason` es el motivo de la acción nueva
+        // PICKUP_NOT_COLLECTED.
+        migrator.registerMigration("v5_pickups") { db in
+            try db.create(table: "driver_pickups") { t in
+                t.primaryKey("request_uuid", .text)
+                t.column("truck_id", .text).notNull()
+                t.column("client_code", .text).notNull()
+                t.column("reason", .text)
+                t.column("pickup_note", .text)
+                t.column("pickup_status", .text).notNull().defaults(to: "EN_CAMION")
+                t.column("expected_items", .text).notNull().defaults(to: "[]")   // JSON
+            }
+            try db.alter(table: "pending_actions") { t in
+                t.add(column: "pickup_for_request_uuid", .text)
+                t.add(column: "pickup_not_collected_reason", .text)
+            }
+        }
+
         return migrator
     }
 }

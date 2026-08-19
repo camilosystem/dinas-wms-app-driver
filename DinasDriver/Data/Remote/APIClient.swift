@@ -22,7 +22,11 @@ protocol DispatchAPI: Sendable {
     /// `POST /dispatch/finish-route`. EN_RUTA → RUTA_CERRADA. Devuelve el resumen.
     func finishRoute() async throws -> RouteSummary
     /// `POST /dispatch/returns`. Registra un retorno de producto (foto base64 en el JSON). 201.
+    /// También registra una RECOGIDA cuando el body trae `pickup_for_request_uuid` (★ v0.45.0).
     func submitReturn(_ request: SubmitReturnRequest) async throws -> ProductReturn
+    /// `POST /dispatch/pickups/{request_uuid}/not-collected` (★ v0.45.0). Declara que una recogida
+    /// no se pudo hacer. Idempotente. `occurred_at` = hora de la visita.
+    func notCollectedPickup(requestUUID: String, request: PickupNotCollectedRequest) async throws -> PickupNotCollectedAck
     /// `POST /dispatch/payments`. Registra un pago (idempotente por payment_uuid). 201/200.
     func submitPayment(_ request: SubmitPaymentRequest) async throws -> PaymentAck
     /// `POST /dispatch/payments/{uuid}/void`. Anula un pago con motivo. Idempotente. 200.
@@ -86,6 +90,13 @@ struct APIClient: AuthAPI, DispatchAPI {
         let data = try JSONCoding.encoder.encode(body)
         let request = try makeRequest(path: "dispatch/returns", method: "POST", body: data)
         return try await send(request, decode: ProductReturn.self)
+    }
+
+    func notCollectedPickup(requestUUID: String, request body: PickupNotCollectedRequest) async throws -> PickupNotCollectedAck {
+        let data = try JSONCoding.encoder.encode(body)
+        let request = try makeRequest(path: "dispatch/pickups/\(requestUUID)/not-collected",
+                                      method: "POST", body: data)
+        return try await send(request, decode: PickupNotCollectedAck.self)
     }
 
     func submitPayment(_ body: SubmitPaymentRequest) async throws -> PaymentAck {

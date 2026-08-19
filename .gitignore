@@ -13,3 +13,4 @@ DerivedData/
 
 # Proyecto Xcode generado por Scripts/generate_project.rb
 DinasDriver.xcodeproj/
+build/

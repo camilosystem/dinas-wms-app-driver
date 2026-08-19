@@ -17,6 +17,7 @@ struct DriverRepository {
         try database.dbQueue.write { db in
             try DriverOrder.deleteAll(db)
             try DriverStop.deleteAll(db)
+            try DriverPickup.deleteAll(db)
             try RouteHeader.deleteAll(db)
             // El reorden local es del camión: si cambió de camión, ya no aplica.
             try LocalStopOrder
@@ -41,6 +42,14 @@ struct DriverRepository {
                                     palletLabels: o.palletLabels,
                                     isIncompleteDelivery: o.isIncompleteDelivery,
                                     deliveryStatus: o.deliveryStatus, lines: o.lines).insert(db)
+                }
+                // ★ v0.45.0 — recogidas de la parada. Una parada de pura recogida tiene orders vacío
+                // y estas filas: se guardan igual para que la parada no quede "sin nada que hacer".
+                for p in stop.pickups {
+                    try DriverPickup(requestUUID: p.requestUUID, truckID: download.truckID,
+                                     clientCode: stop.clientCode, reason: p.reason,
+                                     pickupNote: p.pickupNote, pickupStatus: p.pickupStatus,
+                                     expectedItems: p.expectedItems).insert(db)
                 }
             }
 
@@ -150,6 +159,31 @@ struct DriverRepository {
         }
     }
 
+    /// Recogidas de una parada (★ v0.45.0).
+    func pickups(forClient clientCode: String) throws -> [DriverPickup] {
+        try database.dbQueue.read { db in
+            try DriverPickup.filter(Column("client_code").collating(.nocase) == clientCode)
+                .fetchAll(db)
+        }
+    }
+
+    /// Todas las recogidas de la ruta (para contar por cliente en la lista).
+    func allPickups() throws -> [DriverPickup] {
+        try database.dbQueue.read { db in try DriverPickup.fetchAll(db) }
+    }
+
+    /// ¿Esta recogida ya se registró LOCALMENTE (recogida o no-recogida encolada), sin esperar al
+    /// servidor? Sin esto, offline el `pickup_status` descargado sigue diciendo EN_CAMION y el driver
+    /// registraría dos veces. Cuenta acciones PENDING (aún no confirmadas ni rechazadas).
+    func pickupRegisteredLocally(requestUUID: String) throws -> Bool {
+        try database.dbQueue.read { db in
+            try PendingAction
+                .filter(Column("pickup_for_request_uuid").collating(.nocase) == requestUUID
+                        && Column("status") == PendingActionStatus.pending.rawValue)
+                .fetchCount(db) > 0
+        }
+    }
+
     func allOrders() throws -> [DriverOrder] {
         try database.dbQueue.read { try DriverOrder.order(Column("order_number")).fetchAll($0) }
     }
@@ -183,14 +217,37 @@ struct DriverRepository {
     /// acción distinta (no se deduplica: el servidor asigna un return_id por POST).
     func enqueueReturn(truckID: String, returnUUID: String, clientCode: String,
                        items: [ProductReturnItemInput], note: String?, clientReference: String?,
-                       photoPath: String, occurredAt: Date) throws {
+                       photoPath: String, occurredAt: Date,
+                       pickupForRequestUUID: String? = nil) throws {
         try database.dbQueue.write { db in
             var a = PendingAction(id: nil, truckID: truckID, kind: .productReturn, orderUUID: nil,
                                   orderReason: nil, rejectedItems: nil, note: note,
                                   occurredAt: occurredAt, createdAt: now(), status: .pending,
                                   errorMessage: nil, clientCode: clientCode, returnItems: items,
                                   clientReference: clientReference, photoPath: photoPath,
-                                  returnUUID: returnUUID)
+                                  returnUUID: returnUUID, pickupForRequestUUID: pickupForRequestUUID)
+            try a.insert(db)
+        }
+    }
+
+    /// Encola "no se pudo recoger" (★ v0.45.0). Idempotente por `request_uuid`: reemplaza el
+    /// pendiente previo, igual que el endpoint (reenviar actualiza motivo/nota). `occurredAt` = hora
+    /// real de la visita.
+    func enqueuePickupNotCollected(truckID: String, requestUUID: String,
+                                   reason: PickupNotCollectedReason, note: String?,
+                                   occurredAt: Date) throws {
+        try database.dbQueue.write { db in
+            try PendingAction
+                .filter(Column("kind") == PendingActionKind.pickupNotCollected.rawValue
+                        && Column("pickup_for_request_uuid").collating(.nocase) == requestUUID
+                        && Column("status") == PendingActionStatus.pending.rawValue)
+                .deleteAll(db)
+            var a = PendingAction(id: nil, truckID: truckID, kind: .pickupNotCollected, orderUUID: nil,
+                                  orderReason: nil, rejectedItems: nil, note: note,
+                                  occurredAt: occurredAt, createdAt: now(), status: .pending,
+                                  errorMessage: nil,
+                                  pickupForRequestUUID: requestUUID,
+                                  pickupNotCollectedReason: reason)
             try a.insert(db)
         }
     }

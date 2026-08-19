@@ -16,6 +16,7 @@ final class StubDispatchAPI: AuthAPI, DispatchAPI, @unchecked Sendable {
     private(set) var deliverCalls: [(uuid: String, request: DeliverRequest)] = []
     private(set) var finishCalls = 0
     private(set) var returnCalls: [SubmitReturnRequest] = []
+    private(set) var notCollectedCalls: [(requestUUID: String, request: PickupNotCollectedRequest)] = []
     private(set) var paymentCalls: [SubmitPaymentRequest] = []
     private(set) var voidCalls: [(uuid: String, request: VoidPaymentRequest)] = []
 
@@ -64,6 +65,12 @@ final class StubDispatchAPI: AuthAPI, DispatchAPI, @unchecked Sendable {
         try guardOnline()
         returnCalls.append(request)
         return ProductReturn(returnID: "RET-\(returnCalls.count)")
+    }
+
+    func notCollectedPickup(requestUUID: String, request: PickupNotCollectedRequest) async throws -> PickupNotCollectedAck {
+        try guardOnline()
+        notCollectedCalls.append((requestUUID, request))
+        return PickupNotCollectedAck()
     }
 
     func submitPayment(_ request: SubmitPaymentRequest) async throws -> PaymentAck {

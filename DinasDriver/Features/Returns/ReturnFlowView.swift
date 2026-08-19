@@ -4,9 +4,25 @@ import AVFoundation
 /// "Retorno de producto" (★ v0.15.0). Flujo simple: elegir cliente de su ruta → agregar ítems
 /// (buscar en el catálogo, cantidad, motivo) → tomar la foto (OBLIGATORIA) → guardar. Offline
 /// como todo: se encola, se muestra hecho, sincroniza sola. `occurred_at` = hora de la visita.
+/// Para qué se abre el flujo. OBLIGATORIO (sin default): una recogida NO puede caer por olvido en
+/// una devolución espontánea. El caso `.pickup` fija el cliente y precarga lo esperado como AYUDA.
+enum ReturnFlowMode: Equatable {
+    case spontaneous
+    case pickup(DriverPickup, clientName: String)
+
+    var kind: ReturnKind {
+        switch self {
+        case .spontaneous: return .spontaneous
+        case .pickup(let p, _): return .pickup(requestUUID: p.requestUUID)
+        }
+    }
+}
+
 struct ReturnFlowView: View {
     @EnvironmentObject private var dispatch: DispatchService
     @Environment(\.dismiss) private var dismiss
+
+    let mode: ReturnFlowMode
 
     @State private var stops: [DriverStop] = []
     @State private var selectedClientCode: String?
@@ -29,7 +45,9 @@ struct ReturnFlowView: View {
         Form {
             if saved {
                 Section {
-                    Label("Retorno registrado. Se sincroniza sola.", systemImage: "checkmark.seal.fill")
+                    Label(isPickup ? "Recogida registrada. Se sincroniza sola."
+                                   : "Retorno registrado. Se sincroniza sola.",
+                          systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
                 }
             } else {
@@ -44,7 +62,8 @@ struct ReturnFlowView: View {
                     Button {
                         save()
                     } label: {
-                        Label("Guardar retorno", systemImage: "tray.and.arrow.down.fill")
+                        Label(isPickup ? "Guardar recogida" : "Guardar retorno",
+                              systemImage: "tray.and.arrow.down.fill")
                             .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 4)
                     }
                     .buttonStyle(.borderedProminent)
@@ -56,9 +75,12 @@ struct ReturnFlowView: View {
                 }
             }
         }
-        .navigationTitle("Retorno de producto")
+        .navigationTitle(isPickup ? "Registrar recogida" : "Retorno de producto")
         .navigationBarTitleDisplayModeInlineCompat()
-        .task { stops = (try? dispatch.repo.stops()) ?? [] }
+        .task {
+            stops = (try? dispatch.repo.stops()) ?? []
+            setupPickupIfNeeded()
+        }
         .sheet(isPresented: $showItemSearch) {
             ItemSearchView(search: { (try? dispatch.repo.searchCatalog($0)) ?? [] },
                            onSelect: addItem)
@@ -87,20 +109,45 @@ struct ReturnFlowView: View {
 
     // MARK: - Secciones
 
+    private var isPickup: Bool { if case .pickup = mode { return true }; return false }
+
+    @ViewBuilder
     private var clientSection: some View {
-        Section("Cliente") {
-            // Solo clientes de SU ruta.
-            Picker("Cliente", selection: $selectedClientCode) {
-                Text("Elige un cliente").tag(String?.none)
-                ForEach(stops) { stop in
-                    Text(stop.clientName).tag(String?.some(stop.clientCode))
+        if case let .pickup(pickup, clientName) = mode {
+            // Recogida: el cliente es FIJO (la parada), no se elige.
+            Section("Cliente") {
+                Text(clientName).font(.headline)
+                if let note = pickup.pickupNote, !note.isEmpty {
+                    Label(note, systemImage: "info.circle").font(.callout)
+                }
+            }
+        } else {
+            Section("Cliente") {
+                // Solo clientes de SU ruta.
+                Picker("Cliente", selection: $selectedClientCode) {
+                    Text("Elige un cliente").tag(String?.none)
+                    ForEach(stops) { stop in
+                        Text(stop.clientName).tag(String?.some(stop.clientCode))
+                    }
                 }
             }
         }
     }
 
     private var itemsSection: some View {
-        Section("Ítems a devolver") {
+        Section {
+            itemsRows
+        } header: {
+            Text(isPickup ? "Lo que el cliente entrega" : "Ítems a devolver")
+        } footer: {
+            if isPickup {
+                Text("Los ítems de arriba son la referencia de la solicitud. Registra lo que el cliente entrega, aunque sea menos, más o distinto.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var itemsRows: some View {
             ForEach($items) { $item in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.itemName).font(.body.weight(.medium))
@@ -121,7 +168,6 @@ struct ReturnFlowView: View {
             } label: {
                 Label("Agregar ítem", systemImage: "plus.circle.fill")
             }
-        }
     }
 
     private var photoSection: some View {
@@ -154,10 +200,23 @@ struct ReturnFlowView: View {
                                             quantity: 1, reason: .danado))
     }
 
+    /// Recogida: fija el cliente de la parada y precarga los esperados como AYUDA (editables). Los
+    /// esperados pueden venir vacíos (solicitud por monto): ahí el driver agrega lo que recibe.
+    private func setupPickupIfNeeded() {
+        guard case let .pickup(pickup, _) = mode, selectedClientCode == nil else { return }
+        selectedClientCode = pickup.clientCode
+        if items.isEmpty {
+            items = pickup.expectedItems.map {
+                ProductReturnItemInput(itemCode: $0.itemCode, itemName: $0.itemName ?? $0.itemCode,
+                                       quantity: $0.quantity > 0 ? $0.quantity : 1, reason: .danado)
+            }
+        }
+    }
+
     private func save() {
         guard let clientCode = selectedClientCode, let photoPath,
               let truckID = try? dispatch.repo.routeHeader()?.truckID else { return }
-        dispatch.registerReturn(truckID: truckID, clientCode: clientCode, items: items,
+        dispatch.registerReturn(kind: mode.kind, truckID: truckID, clientCode: clientCode, items: items,
                                 note: note.isEmpty ? nil : note,
                                 clientReference: clientReference.isEmpty ? nil : clientReference,
                                 photoPath: photoPath)

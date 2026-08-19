@@ -164,7 +164,7 @@ struct MyRouteView: View {
                         StopView(stop: stop)
                     } label: {
                         StopRow(stop: stop, delivered: model.deliveredCount(stop),
-                                total: model.orderCount(stop))
+                                total: model.orderCount(stop), pickups: model.pickupCount(stop))
                     }
                 }
                 .onMove { from, to in
@@ -196,7 +196,7 @@ struct MyRouteView: View {
                 NavigationLink { CashBoxView() } label: {
                     Label("Mi caja", systemImage: "tray.full")
                 }
-                NavigationLink { ReturnFlowView() } label: {
+                NavigationLink { ReturnFlowView(mode: .spontaneous) } label: {
                     Label("Retorno de producto", systemImage: "arrow.uturn.backward.square")
                         .foregroundStyle(model.header?.startedAt == nil ? Color.secondary : Color.primary)
                 }
@@ -219,11 +219,14 @@ struct MyRouteView: View {
     }
 }
 
-/// Fila de una parada: número, cliente y avance de entregas.
+/// Fila de una parada: número, cliente y avance. El distintivo dice TRES estados —solo entrega,
+/// solo recogida, o ambas— porque una parada mixta con un booleano "tiene recogida" se vería igual
+/// que una de pura recogida y el driver podría irse sin entregar (★ v0.45.0).
 private struct StopRow: View {
     let stop: DriverStop
     let delivered: Int
     let total: Int
+    let pickups: Int
 
     var body: some View {
         HStack(spacing: 12) {
@@ -234,6 +237,11 @@ private struct StopRow: View {
                 Text(stop.clientName).font(.body.weight(.medium))
                 if let address = stop.address, !address.isEmpty {
                     Text(address).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if pickups > 0 {
+                    Label(total > 0 ? "Entrega + recogida" : "Solo recogida",
+                          systemImage: "shippingbox.and.arrow.backward")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.orange)
                 }
             }
             Spacer()
@@ -253,6 +261,7 @@ final class MyRouteViewModel: ObservableObject {
     @Published var stops: [DriverStop] = []
     private var orderCounts: [String: Int] = [:]      // client_code → # pedidos
     private var deliveredCounts: [String: Int] = [:]  // client_code → # con estado
+    private var pickupCounts: [String: Int] = [:]     // client_code → # recogidas
     private weak var dispatch: DispatchService?
 
     func attach(_ dispatch: DispatchService) { self.dispatch = dispatch }
@@ -271,10 +280,13 @@ final class MyRouteViewModel: ObservableObject {
             let d = DispatchService.display(order: o, pending: pendingByOrder[o.orderUUID.lowercased()])
             if d.status != nil { deliveredCounts[o.clientCode, default: 0] += 1 }
         }
+        pickupCounts = [:]
+        for p in (try? repo.allPickups()) ?? [] { pickupCounts[p.clientCode, default: 0] += 1 }
     }
 
     func orderCount(_ stop: DriverStop) -> Int { orderCounts[stop.clientCode] ?? 0 }
     func deliveredCount(_ stop: DriverStop) -> Int { deliveredCounts[stop.clientCode] ?? 0 }
+    func pickupCount(_ stop: DriverStop) -> Int { pickupCounts[stop.clientCode] ?? 0 }
 
     /// Reordena SOLO la vista y lo persiste local (device-only, nunca al servidor).
     func move(from: IndexSet, to: Int) {

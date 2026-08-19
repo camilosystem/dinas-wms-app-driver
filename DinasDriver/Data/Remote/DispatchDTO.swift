@@ -57,6 +57,9 @@ struct RouteDownload: Decodable {
         let zipCode: String?
         let phone: String?
         let orders: [Order]
+        /// ★ v0.45.0 — recogidas de esta parada (puede venir vacía; una parada de pura recogida
+        /// tiene `orders: []` y `pickups` con contenido).
+        let pickups: [Pickup]
 
         enum CodingKeys: String, CodingKey {
             case stopNumber = "stop_number"
@@ -64,7 +67,7 @@ struct RouteDownload: Decodable {
             case clientName = "client_name"
             case address, city
             case zipCode = "zip_code"
-            case phone, orders
+            case phone, orders, pickups
         }
 
         init(from decoder: Decoder) throws {
@@ -77,6 +80,33 @@ struct RouteDownload: Decodable {
             zipCode = try c.decodeIfPresent(String.self, forKey: .zipCode)
             phone = try c.decodeIfPresent(String.self, forKey: .phone)
             orders = try c.decodeIfPresent([Order].self, forKey: .orders) ?? []
+            pickups = try c.decodeIfPresent([Pickup].self, forKey: .pickups) ?? []
+        }
+
+        /// `DriverPickup` sin `truck_id`/`client_code` (los pone el contexto de la parada al guardar).
+        struct Pickup: Decodable {
+            let requestUUID: String
+            let reason: String?
+            let pickupNote: String?
+            let pickupStatus: String
+            let expectedItems: [DriverPickupItem]
+
+            enum CodingKeys: String, CodingKey {
+                case requestUUID = "request_uuid"
+                case reason
+                case pickupNote = "pickup_note"
+                case pickupStatus = "pickup_status"
+                case expectedItems = "expected_items"
+            }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                requestUUID = try c.decode(String.self, forKey: .requestUUID)
+                reason = try c.decodeIfPresent(String.self, forKey: .reason)
+                pickupNote = try c.decodeIfPresent(String.self, forKey: .pickupNote)
+                pickupStatus = try c.decodeIfPresent(String.self, forKey: .pickupStatus) ?? "EN_CAMION"
+                expectedItems = try c.decodeIfPresent([DriverPickupItem].self, forKey: .expectedItems) ?? []
+            }
         }
     }
 
@@ -181,6 +211,11 @@ struct SubmitReturnRequest: Encodable {
     let note: String?
     let occurredAt: Date
     let clientReference: String?
+    /// ★ v0.45.0 — Si esta devolución ES la recogida de una solicitud, su `request_uuid`. `nil` en
+    /// una devolución espontánea (el encoder omite la clave). ⚠️ Es el enlace OPUESTO a
+    /// `credit_request_uuid`: escribir el campo equivocado permitiría un segundo crédito por la
+    /// misma mercancía. Acá solo existe este; no hay forma de escribir el otro por error.
+    let pickupForRequestUUID: String?
 
     struct Item: Encodable {
         let itemCode: String
@@ -201,6 +236,20 @@ struct SubmitReturnRequest: Encodable {
         case note
         case occurredAt = "occurred_at"
         case clientReference = "client_reference"
+        case pickupForRequestUUID = "pickup_for_request_uuid"
+    }
+}
+
+/// Cuerpo de `POST /dispatch/pickups/{request_uuid}/not-collected` (★ v0.45.0). Idempotente:
+/// reenviar actualiza motivo/nota. `occurredAt` = hora real de la visita, no la de sincronización.
+struct PickupNotCollectedRequest: Encodable {
+    let reason: PickupNotCollectedReason
+    let note: String?
+    let occurredAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case reason, note
+        case occurredAt = "occurred_at"
     }
 }
 
@@ -216,6 +265,12 @@ struct ProductReturn: Decodable {
     }
 
     init(returnID: String) { self.returnID = returnID }
+}
+
+/// Respuesta de not-collected (`CreditRequestPickup`). No se usa el cuerpo: solo importa el 200.
+struct PickupNotCollectedAck: Decodable {
+    init() {}
+    init(from decoder: Decoder) throws {}
 }
 
 // MARK: - Terminar ruta (POST /dispatch/finish-route)
