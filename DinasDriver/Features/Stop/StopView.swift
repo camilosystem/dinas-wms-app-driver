@@ -7,6 +7,10 @@ struct StopView: View {
     let stop: DriverStop
     @State private var orders: [DriverOrder] = []
     @State private var pendingByOrder: [String: PendingAction] = [:]
+    /// Entregas RECHAZADAS por el servidor, por pedido → se muestran en su orden con el motivo.
+    @State private var failedByOrder: [String: PendingAction] = [:]
+    /// Retornos espontáneos rechazados de este cliente.
+    @State private var failedReturns: [PendingAction] = []
     @State private var pickups: [DriverPickup] = []
     /// Estado local por recogida (pendiente / resuelta / rechazada / a ofrecer).
     @State private var pickupStates: [String: PickupUIState] = [:]
@@ -50,8 +54,19 @@ struct StopView: View {
                         } label: {
                             OrderRow(order: order,
                                      display: DispatchService.display(order: order,
-                                                                      pending: pendingByOrder[order.orderUUID.lowercased()]))
+                                                                      pending: pendingByOrder[order.orderUUID.lowercased()]),
+                                     failedReason: failedByOrder[order.orderUUID]?.errorMessage)
                         }
+                    }
+                }
+            }
+
+            if !failedReturns.isEmpty {
+                Section("Retornos rechazados") {
+                    ForEach(failedReturns) { r in
+                        Label("El registro no llegó: \(r.errorMessage ?? "el servidor lo rechazó").",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.red)
                     }
                 }
             }
@@ -76,6 +91,13 @@ struct StopView: View {
         let pending = (try? dispatch.repo.pendingDelivers()) ?? []
         pendingByOrder = Dictionary(pending.compactMap { a in a.orderUUID.map { ($0.lowercased(), a) } },
                                     uniquingKeysWith: { a, _ in a })
+        failedByOrder = [:]
+        for o in orders {
+            if let f = try? dispatch.repo.failedDeliverAction(orderUUID: o.orderUUID) {
+                failedByOrder[o.orderUUID] = f
+            }
+        }
+        failedReturns = (try? dispatch.repo.failedReturns(clientCode: stop.clientCode)) ?? []
         pickups = (try? dispatch.repo.pickups(forClient: stop.clientCode)) ?? []
         pickupStates = Dictionary(uniqueKeysWithValues: pickups.map { ($0.requestUUID, state(for: $0)) })
     }
@@ -172,6 +194,9 @@ private struct PickupRow: View {
 struct OrderRow: View {
     let order: DriverOrder
     let display: DeliveryDisplay
+    /// Si el servidor RECHAZÓ el registro de entrega: motivo (con sus palabras). El registro no
+    /// llegó — el driver lo ve en la orden y la vuelve a registrar.
+    var failedReason: String? = nil
 
     var body: some View {
         HStack {
@@ -182,6 +207,10 @@ struct OrderRow: View {
                 if order.isIncompleteDelivery {
                     Label("Vino incompleto del picking", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                }
+                if let failedReason {
+                    Label("El registro no llegó: \(failedReason)", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2.weight(.bold)).foregroundStyle(.red)
                 }
             }
             Spacer()

@@ -33,6 +33,10 @@ struct LocalRouteSummary: Equatable {
 final class DispatchService: ObservableObject {
     @Published private(set) var downloadState: RouteDownloadState = .notDownloaded
     @Published private(set) var pendingCount = 0
+    /// ★ Señal AGREGADA de registros RECHAZADOS por el servidor (entregas, retornos, pagos). No
+    /// llegaron y NO se reintentan: hay que rehacerlos. Se muestra en la pantalla principal para que
+    /// el driver los note sin recorrer parada por parada (el detalle vive en cada acción).
+    @Published private(set) var rejectedCount = 0
     @Published private(set) var isSyncing = false
     @Published var loadError: String?
     /// El resumen del servidor tras cerrar (si llegó). Si no, se usa el local.
@@ -342,6 +346,8 @@ final class DispatchService: ObservableObject {
         let actions = (try? repo.pendingCount()) ?? 0
         let payments = (try? repo.pendingPaymentsCount()) ?? 0   // ★ el dinero cuenta aquí
         pendingCount = actions + payments
+        // Señal agregada de rechazos: acciones .failed (entregas + retornos + recogidas) + pagos rechazados.
+        rejectedCount = ((try? repo.failedActionsCount()) ?? 0) + ((try? repo.rejectedPaymentsCount()) ?? 0)
     }
 
     // MARK: - Derivaciones (reflejo de lo registrado; el estado real lo deriva el server)

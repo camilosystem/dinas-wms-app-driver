@@ -350,6 +350,45 @@ struct DriverRepository {
         _ = try database.dbQueue.write { try PendingAction.deleteOne($0, key: id) }
     }
 
+    /// Acciones RECHAZADAS de forma permanente (para la señal agregada de la pantalla principal).
+    func failedActionsCount() throws -> Int {
+        try database.dbQueue.read { db in
+            try PendingAction.filter(Column("status") == PendingActionStatus.failed.rawValue).fetchCount(db)
+        }
+    }
+
+    /// Todas las acciones rechazadas (para mapear a qué parada pertenece cada una).
+    func failedActions() throws -> [PendingAction] {
+        try database.dbQueue.read { db in
+            try PendingAction.filter(Column("status") == PendingActionStatus.failed.rawValue).fetchAll(db)
+        }
+    }
+
+    /// La entrega de un pedido que el servidor RECHAZÓ de forma permanente (para mostrarlo en su
+    /// orden, con el motivo). `nil` si no hay rechazo.
+    func failedDeliverAction(orderUUID: String) throws -> PendingAction? {
+        try database.dbQueue.read { db in
+            try PendingAction
+                .filter(Column("kind") == PendingActionKind.deliver.rawValue
+                        && Column("order_uuid").collating(.nocase) == orderUUID
+                        && Column("status") == PendingActionStatus.failed.rawValue)
+                .order(Column("created_at").desc).fetchOne(db)
+        }
+    }
+
+    /// Retornos ESPONTÁNEOS (no recogidas) de un cliente que el servidor rechazó de forma
+    /// permanente. Los de recogida ya se muestran en la sección de recogida de la parada.
+    func failedReturns(clientCode: String) throws -> [PendingAction] {
+        try database.dbQueue.read { db in
+            try PendingAction
+                .filter(Column("kind") == PendingActionKind.productReturn.rawValue
+                        && Column("client_code").collating(.nocase) == clientCode
+                        && Column("pickup_for_request_uuid") == nil
+                        && Column("status") == PendingActionStatus.failed.rawValue)
+                .fetchAll(db)
+        }
+    }
+
     func markActionFailed(id: Int64, error: String) throws {
         try database.dbQueue.write { db in
             guard var a = try PendingAction.fetchOne(db, key: id) else { return }

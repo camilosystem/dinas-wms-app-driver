@@ -123,6 +123,13 @@ struct MyRouteView: View {
 
     private var routeContent: some View {
         List {
+            if dispatch.rejectedCount > 0 {
+                Section {
+                    Label("\(dispatch.rejectedCount) registro(s) rechazado(s). No llegaron al servidor: hay que rehacerlos.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout.weight(.semibold)).foregroundStyle(.red)
+                }
+            }
             if let header = model.header {
                 Section {
                     HStack {
@@ -164,7 +171,8 @@ struct MyRouteView: View {
                         StopView(stop: stop)
                     } label: {
                         StopRow(stop: stop, delivered: model.deliveredCount(stop),
-                                total: model.orderCount(stop), pickups: model.pickupCount(stop))
+                                total: model.orderCount(stop), pickups: model.pickupCount(stop),
+                                rejected: model.hasRejection(stop))
                     }
                 }
                 .onMove { from, to in
@@ -227,6 +235,7 @@ private struct StopRow: View {
     let delivered: Int
     let total: Int
     let pickups: Int
+    let rejected: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -242,6 +251,10 @@ private struct StopRow: View {
                     Label(total > 0 ? "Entrega + recogida" : "Solo recogida",
                           systemImage: "shippingbox.and.arrow.backward")
                         .font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                }
+                if rejected {
+                    Label("Registro rechazado", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2.weight(.bold)).foregroundStyle(.red)
                 }
             }
             Spacer()
@@ -262,6 +275,7 @@ final class MyRouteViewModel: ObservableObject {
     private var orderCounts: [String: Int] = [:]      // client_code → # pedidos
     private var deliveredCounts: [String: Int] = [:]  // client_code → # con estado
     private var pickupCounts: [String: Int] = [:]     // client_code → # recogidas
+    private var rejectedClients: Set<String> = []     // clientes con un registro RECHAZADO
     private weak var dispatch: DispatchService?
 
     func attach(_ dispatch: DispatchService) { self.dispatch = dispatch }
@@ -281,12 +295,35 @@ final class MyRouteViewModel: ObservableObject {
             if d.status != nil { deliveredCounts[o.clientCode, default: 0] += 1 }
         }
         pickupCounts = [:]
-        for p in (try? repo.allPickups()) ?? [] { pickupCounts[p.clientCode, default: 0] += 1 }
+        let allPickups = (try? repo.allPickups()) ?? []
+        for p in allPickups { pickupCounts[p.clientCode, default: 0] += 1 }
+
+        // Clientes con un registro RECHAZADO (entrega/retorno/recogida), para marcar su parada: un
+        // fallo en una parada ya pasada es invisible si no se señala — y nadie reabre una terminada.
+        let orderClient = Dictionary(orders.map { ($0.orderUUID.lowercased(), $0.clientCode) },
+                                     uniquingKeysWith: { a, _ in a })
+        let pickupClient = Dictionary(allPickups.map { ($0.requestUUID.lowercased(), $0.clientCode) },
+                                      uniquingKeysWith: { a, _ in a })
+        var rejected = Set<String>()
+        for a in (try? repo.failedActions()) ?? [] {
+            switch a.kind {
+            case .deliver:
+                if let u = a.orderUUID?.lowercased(), let c = orderClient[u] { rejected.insert(c) }
+            case .productReturn:
+                if let c = a.clientCode { rejected.insert(c) }
+            case .pickupNotCollected:
+                if let r = a.pickupForRequestUUID?.lowercased(), let c = pickupClient[r] { rejected.insert(c) }
+            case .startRoute, .finishRoute:
+                break
+            }
+        }
+        rejectedClients = rejected
     }
 
     func orderCount(_ stop: DriverStop) -> Int { orderCounts[stop.clientCode] ?? 0 }
     func deliveredCount(_ stop: DriverStop) -> Int { deliveredCounts[stop.clientCode] ?? 0 }
     func pickupCount(_ stop: DriverStop) -> Int { pickupCounts[stop.clientCode] ?? 0 }
+    func hasRejection(_ stop: DriverStop) -> Bool { rejectedClients.contains(stop.clientCode) }
 
     /// Reordena SOLO la vista y lo persiste local (device-only, nunca al servidor).
     func move(from: IndexSet, to: Int) {
