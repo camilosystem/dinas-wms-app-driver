@@ -18,6 +18,9 @@ final class StubDispatchAPI: AuthAPI, DispatchAPI, @unchecked Sendable {
     private(set) var returnCalls: [SubmitReturnRequest] = []
     private(set) var notCollectedCalls: [(requestUUID: String, request: PickupNotCollectedRequest)] = []
     private(set) var paymentCalls: [SubmitPaymentRequest] = []
+    /// Intentos de submitPayment, contados ANTES de decidir online/offline/rechazo (para verificar
+    /// el número EXACTO de reintentos, incluidos los que terminan en error).
+    private(set) var submitPaymentAttempts = 0
     private(set) var voidCalls: [(uuid: String, request: VoidPaymentRequest)] = []
 
     private func guardOnline() throws {
@@ -74,6 +77,7 @@ final class StubDispatchAPI: AuthAPI, DispatchAPI, @unchecked Sendable {
     }
 
     func submitPayment(_ request: SubmitPaymentRequest) async throws -> PaymentAck {
+        submitPaymentAttempts += 1
         try guardOnline()
         paymentCalls.append(request)
         return PaymentAck(paymentUUID: request.paymentUUID)

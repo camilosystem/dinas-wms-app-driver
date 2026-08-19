@@ -92,8 +92,13 @@ private struct PaymentRow: View {
                 if payment.isVoided, let reason = payment.voidReason {
                     Text("Motivo: \(reason)").font(.caption2).foregroundStyle(.red)
                 }
-                if payment.needsSync {
-                    Label("sin enviar", systemImage: "arrow.triangle.2.circlepath")
+                if let reason = payment.rejectedReason {
+                    // ★ RECHAZADO por el servidor: NO está registrado. Es dinero que no llegó — el
+                    // driver tiene que verlo antes de cerrar el día, con las palabras del servidor.
+                    Label("Rechazado: \(reason)", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.red)
+                } else if payment.needsSync {
+                    Label("Pendiente de sincronizar", systemImage: "arrow.triangle.2.circlepath")
                         .font(.caption2).foregroundStyle(.orange)
                 }
             }

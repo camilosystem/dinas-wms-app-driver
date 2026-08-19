@@ -390,11 +390,14 @@ struct DriverRepository {
         }
     }
 
-    /// Pagos con algo sin sincronizar (crear o anular).
+    /// Pagos con algo que REINTENTAR (crear o anular sin enviar y NO rechazado). Un rechazo
+    /// permanente los saca de acá: dejan de reintentarse.
     func paymentsNeedingSync() throws -> [Payment] {
         try database.dbQueue.read { db in
-            try Payment.filter(Column("create_synced") == false
-                               || (Column("is_voided") == true && Column("void_synced") == false))
+            try Payment.filter(
+                (Column("create_synced") == false && Column("create_rejected_reason") == nil)
+                || (Column("is_voided") == true && Column("void_synced") == false
+                    && Column("void_rejected_reason") == nil))
                 .order(Column("created_at")).fetchAll(db)
         }
     }
@@ -434,9 +437,37 @@ struct DriverRepository {
     /// Cuántos pagos están sin sincronizar (para el indicador — dinero sin registro es grave).
     func pendingPaymentsCount() throws -> Int {
         try database.dbQueue.read { db in
-            try Payment.filter(Column("create_synced") == false
-                               || (Column("is_voided") == true && Column("void_synced") == false))
+            try Payment.filter(
+                (Column("create_synced") == false && Column("create_rejected_reason") == nil)
+                || (Column("is_voided") == true && Column("void_synced") == false
+                    && Column("void_rejected_reason") == nil))
                 .fetchCount(db)
+        }
+    }
+
+    /// Cuenta de pagos con un rechazo permanente sin resolver (para la señal agregada).
+    func rejectedPaymentsCount() throws -> Int {
+        try database.dbQueue.read { db in
+            try Payment.filter(Column("create_rejected_reason") != nil
+                               || Column("void_rejected_reason") != nil).fetchCount(db)
+        }
+    }
+
+    func markPaymentCreateRejected(paymentUUID: String, reason: String) throws {
+        try database.dbQueue.write { db in
+            guard var p = try Payment
+                .filter(Column("payment_uuid").collating(.nocase) == paymentUUID).fetchOne(db) else { return }
+            p.createRejectedReason = reason
+            try p.update(db)
+        }
+    }
+
+    func markPaymentVoidRejected(paymentUUID: String, reason: String) throws {
+        try database.dbQueue.write { db in
+            guard var p = try Payment
+                .filter(Column("payment_uuid").collating(.nocase) == paymentUUID).fetchOne(db) else { return }
+            p.voidRejectedReason = reason
+            try p.update(db)
         }
     }
 }

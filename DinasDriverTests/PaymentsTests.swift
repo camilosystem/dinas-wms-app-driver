@@ -10,6 +10,56 @@ import UniformTypeIdentifiers
 @MainActor
 final class PaymentsTests: XCTestCase {
 
+    // MARK: - Rechazo permanente (deja de reintentarse + la caja lo distingue)
+
+    /// Un pago RECHAZADO de forma permanente deja de reintentarse (número EXACTO de intentos = 1) y
+    /// la caja lo distingue de "pendiente de sincronizar".
+    func test_pagoRechazadoPermanente_dejaDeReintentarse_yLaCajaLoDistingue() async throws {
+        let (s, api) = service(offline: true)
+        let uuid = s.registerPayment(truckID: "T1", clientCode: "C1", clientName: "Tienda Uno",
+                                     amount: 100, type: .cash, checkNumber: nil, note: nil, photoPath: nil)
+        XCTAssertEqual(try s.repo.pendingPaymentsCount(), 1)
+
+        // El servidor lo rechaza de forma DEFINITIVA (p. ej. cliente inexistente).
+        api.offline = false
+        api.permanentError = .server(status: 400, message: "El cliente no existe")
+        await s.syncPending()
+
+        let p = try XCTUnwrap(try s.repo.payment(uuid: uuid))
+        XCTAssertEqual(p.createRejectedReason, "El cliente no existe", "se marca el rechazo, con las palabras del servidor")
+        XCTAssertTrue(p.isRejected)
+        XCTAssertFalse(p.needsSync, "un rechazo permanente NO es 'pendiente de sincronizar'")
+        XCTAssertEqual(try s.repo.pendingPaymentsCount(), 0, "sale de pendientes")
+        XCTAssertEqual(try s.repo.rejectedPaymentsCount(), 1)
+        XCTAssertEqual(api.submitPaymentAttempts, 1, "se intentó UNA vez")
+
+        // La clave: sincronizar de nuevo NO lo reintenta. Número EXACTO, no 'pocos'.
+        await s.syncPending()
+        await s.syncPending()
+        XCTAssertEqual(api.submitPaymentAttempts, 1, "un pago rechazado no se reintenta: sigue en 1")
+    }
+
+    /// El PAR NEGATIVO: un fallo de RED (transitorio) NO marca el pago como rechazado — sigue en la
+    /// cola y se reintenta cuando vuelva la señal.
+    func test_pagoFalloDeRed_noSeMarcaRechazado_ySiguePendiente() async throws {
+        let (s, api) = service(offline: true)   // sin señal
+        let uuid = s.registerPayment(truckID: "T1", clientCode: "C1", clientName: "Tienda Uno",
+                                     amount: 100, type: .cash, checkNumber: nil, note: nil, photoPath: nil)
+        await s.syncPending()   // sigue offline → transitorio
+
+        let p = try XCTUnwrap(try s.repo.payment(uuid: uuid))
+        XCTAssertNil(p.createRejectedReason, "sin señal no es rechazo")
+        XCTAssertFalse(p.isRejected)
+        XCTAssertTrue(p.needsSync, "sigue pendiente de sincronizar")
+        XCTAssertEqual(try s.repo.pendingPaymentsCount(), 1)
+
+        // Al volver la señal, se envía normalmente (nunca se marcó rechazado).
+        api.offline = false
+        await s.syncPending()
+        XCTAssertTrue(try s.repo.payment(uuid: uuid)!.createSynced)
+        XCTAssertEqual(api.paymentCalls.count, 1)
+    }
+
     private func makeJPEG(width: Int, height: Int) -> Data {
         let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
                             bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),

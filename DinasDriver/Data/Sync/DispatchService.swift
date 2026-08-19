@@ -239,9 +239,12 @@ final class DispatchService: ObservableObject {
 
         // ★ Pagos (dinero → máxima robustez). El registro local NO se pierde: se sincroniza crear
         // (idempotente por payment_uuid, borra la foto del cheque al lograrlo) y anular (idempotente).
-        for payment in (try? repo.paymentsNeedingSync()) ?? [] {
-            do {
-                if !payment.createSynced {
+        paymentLoop: for payment in (try? repo.paymentsNeedingSync()) ?? [] {
+            // CREAR. Un rechazo PERMANENTE (4xx) se MARCA y deja de reintentarse (si no, reintenta
+            // por siempre); la caja lo mostrará en rojo, no como "pendiente". No se descarta el pago
+            // (es dinero): queda como registro rechazado, para reconstruir la caja.
+            if !payment.createSynced {
+                do {
                     var base64: String?
                     if payment.paymentType == .cheque, let path = payment.photoPath {
                         guard FileManager.default.fileExists(atPath: path) else {
@@ -257,22 +260,34 @@ final class DispatchService: ObservableObject {
                     _ = try await api.submitPayment(req)
                     try? repo.markPaymentCreateSynced(paymentUUID: payment.paymentUUID)
                     if let path = payment.photoPath { photos.delete(atPath: path) }
+                } catch APIError.unauthorized {
+                    onUnauthorized(); break paymentLoop
+                } catch let error as APIError where error.isPermanent {
+                    let reason = error.serverMessage ?? "El servidor rechazó el pago (\(error.serverStatus))."
+                    try? repo.markPaymentCreateRejected(paymentUUID: payment.paymentUUID, reason: reason)
+                    AppLog.api.error("pago \(payment.paymentUUID, privacy: .public) RECHAZADO al crear: \(reason, privacy: .public)")
+                    continue paymentLoop   // no se anula algo que el servidor nunca creó
+                } catch {
+                    break paymentLoop      // transitorio (sin señal/timeout): sigue en cola, se reintenta
                 }
-                if payment.isVoided && !payment.voidSynced {
+            }
+            // ANULAR (idempotente). Mismo criterio para su propio rechazo permanente.
+            if payment.isVoided && !payment.voidSynced {
+                do {
                     let req = VoidPaymentRequest(reason: payment.voidReason ?? "",
                                                  occurredAt: payment.voidedAt ?? now())
                     _ = try await api.voidPayment(paymentUUID: payment.paymentUUID, request: req)
                     try? repo.markPaymentVoidSynced(paymentUUID: payment.paymentUUID)
+                } catch APIError.unauthorized {
+                    onUnauthorized(); break paymentLoop
+                } catch let error as APIError where error.isPermanent {
+                    let reason = error.serverMessage ?? "El servidor rechazó la anulación (\(error.serverStatus))."
+                    try? repo.markPaymentVoidRejected(paymentUUID: payment.paymentUUID, reason: reason)
+                    AppLog.api.error("anulación \(payment.paymentUUID, privacy: .public) RECHAZADA: \(reason, privacy: .public)")
+                    continue paymentLoop
+                } catch {
+                    break paymentLoop
                 }
-            } catch APIError.unauthorized {
-                onUnauthorized(); break
-            } catch let error as APIError where error.isPermanent {
-                // Permanente (400): NO se descarta un pago (es dinero). Queda visible como
-                // pendiente para que se note y se corrija; se salta al siguiente.
-                AppLog.api.error("pago \(payment.paymentUUID, privacy: .public) RECHAZADO: \(error.serverMessage ?? "", privacy: .public)")
-                continue
-            } catch {
-                break   // transitorio: reintenta luego
             }
         }
         refreshPending()

@@ -36,13 +36,26 @@ struct Payment: Codable, FetchableRecord, PersistableRecord, Identifiable, Equat
     var createSynced: Bool
     /// La anulación (si `isVoided`) llegó al servidor.
     var voidSynced: Bool
+    /// ★ El servidor RECHAZÓ la creación de forma permanente (4xx). Motivo, con sus palabras. Un
+    /// pago rechazado NO se reintenta (si no, reintenta por siempre) y NO se muestra como
+    /// "pendiente de sincronizar" (si no, el driver cree que se registró). `nil` = no rechazado.
+    var createRejectedReason: String? = nil
+    /// Igual para la anulación.
+    var voidRejectedReason: String? = nil
 
     var id: String { paymentUUID }
     static let databaseTableName = "payments"
 
-    /// ¿Tiene algo sin sincronizar? (crear, o anular). El indicador de pendientes lo usa —
-    /// un pago sin enviar es dinero sin registro.
-    var needsSync: Bool { !createSynced || (isVoided && !voidSynced) }
+    /// ¿Tiene algo que REINTENTAR? (crear o anular sin enviar y NO rechazado). Un rechazo permanente
+    /// deja de reintentarse: no es "pendiente de sincronizar", es un problema a la vista.
+    var needsSync: Bool {
+        (!createSynced && createRejectedReason == nil)
+            || (isVoided && !voidSynced && voidRejectedReason == nil)
+    }
+
+    /// Hay un rechazo permanente sin resolver (crear o anular) → la caja lo marca en rojo.
+    var isRejected: Bool { createRejectedReason != nil || voidRejectedReason != nil }
+    var rejectedReason: String? { createRejectedReason ?? voidRejectedReason }
 
     enum CodingKeys: String, CodingKey {
         case paymentUUID = "payment_uuid"
@@ -61,6 +74,8 @@ struct Payment: Codable, FetchableRecord, PersistableRecord, Identifiable, Equat
         case voidedAt = "voided_at"
         case createSynced = "create_synced"
         case voidSynced = "void_synced"
+        case createRejectedReason = "create_rejected_reason"
+        case voidRejectedReason = "void_rejected_reason"
     }
 }
 

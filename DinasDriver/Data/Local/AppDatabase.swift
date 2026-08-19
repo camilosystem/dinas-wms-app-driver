@@ -184,6 +184,16 @@ struct AppDatabase {
             }
         }
 
+        // ★ Pagos: rechazo permanente. Sin esto, un pago rechazado por el servidor se reintenta en
+        // cada sync (para siempre) y se muestra como "pendiente" — el driver cierra el día creyendo
+        // que se registró. Marcar el rechazo detiene el reintento y la caja lo distingue de pendiente.
+        migrator.registerMigration("v6_pago_rechazado") { db in
+            try db.alter(table: "payments") { t in
+                t.add(column: "create_rejected_reason", .text)
+                t.add(column: "void_rejected_reason", .text)
+            }
+        }
+
         return migrator
     }
 }
