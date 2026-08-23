@@ -199,15 +199,18 @@ struct DeliveryRecord: Decodable {
 
 // MARK: - Retorno de producto (POST /dispatch/returns, ★ v0.15.0)
 
-/// Cuerpo del retorno. TODO en una petición: o entra completo con su evidencia, o no entra.
-/// `photoBase64` = la foto YA redimensionada por la app, en base64 SIN prefijo data-uri.
+/// Cuerpo del retorno. `photoBase64` = la foto YA redimensionada por la app, en base64 SIN prefijo
+/// data-uri. ★ v0.68.0 — la foto es OPCIONAL: sin foto se OMITE la clave (la ausencia de un hecho
+/// no es un valor; el servidor deriva `has_photo`). El encoder sintetizado omite los opcionales nil.
 struct SubmitReturnRequest: Encodable {
     /// ★ Lo GENERA la app al crear el retorno (no al enviar) y hace el POST idempotente: el
     /// reintento manda el MISMO uuid → el servidor no duplica. Es la identidad del retorno.
     let returnUUID: String
     let clientCode: String
     let items: [Item]
-    let photoBase64: String
+    /// `nil` = el driver registró SIN foto (acto deliberado) → la clave se omite. NUNCA es nil por
+    /// una foto que sí se sacó pero no se pudo leer: ese caso falla ruidosamente en la subida.
+    let photoBase64: String?
     let note: String?
     let occurredAt: Date
     let clientReference: String?

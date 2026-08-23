@@ -2,7 +2,8 @@ import SwiftUI
 import AVFoundation
 
 /// "Retorno de producto" (★ v0.15.0). Flujo simple: elegir cliente de su ruta → agregar ítems
-/// (buscar en el catálogo, cantidad, motivo) → tomar la foto (OBLIGATORIA) → guardar. Offline
+/// (buscar en el catálogo, cantidad, motivo) → tomar la foto (el camino normal; ★ v0.68.0 ya no
+/// bloquea: se puede registrar sin ella con confirmación) → guardar. Offline
 /// como todo: se encola, se muestra hecho, sincroniza sola. `occurred_at` = hora de la visita.
 /// Para qué se abre el flujo. OBLIGATORIO (sin default): una recogida NO puede caer por olvido en
 /// una devolución espontánea. El caso `.pickup` fija el cliente y precarga lo esperado como AYUDA.
@@ -34,11 +35,14 @@ struct ReturnFlowView: View {
     @State private var showItemSearch = false
     @State private var showCamera = false
     @State private var showCameraDenied = false
+    @State private var showNoPhotoConfirm = false
     @State private var saved = false
 
+    // ★ v0.68.0 — la foto ya NO es requisito para guardar. Sigue siendo el camino normal; registrar
+    // sin ella es un acto deliberado (confirmación), no lo que pasa por omisión.
     private var canSave: Bool {
         selectedClientCode != nil && !items.isEmpty
-            && items.allSatisfy { $0.quantity > 0 } && photoPath != nil
+            && items.allSatisfy { $0.quantity > 0 }
     }
 
     var body: some View {
@@ -60,7 +64,9 @@ struct ReturnFlowView: View {
                 }
                 Section {
                     Button {
-                        save()
+                        // Sin foto = acto deliberado: confirma. Con foto, guarda directo. Tocar
+                        // "Guardar" antes de tiempo NO registra sin foto por omisión.
+                        if photoPath == nil { showNoPhotoConfirm = true } else { save() }
                     } label: {
                         Label(isPickup ? "Guardar recogida" : "Guardar retorno",
                               systemImage: "tray.and.arrow.down.fill")
@@ -70,7 +76,7 @@ struct ReturnFlowView: View {
                     .disabled(!canSave)
                 } footer: {
                     if photoPath == nil {
-                        Text("La foto es obligatoria: sin ella no se puede guardar.")
+                        Text("La foto es el camino normal. Si no puedes tomarla, al guardar te pedirá confirmar.")
                     }
                 }
             }
@@ -93,6 +99,15 @@ struct ReturnFlowView: View {
             .ignoresSafeArea()
         }
         #endif
+        // Registrar SIN foto: deliberado y sin pedir motivo (eso sería el bloqueo con otra forma;
+        // el motivo lo persigue la oficina, que ve `has_photo`).
+        .confirmationDialog(isPickup ? "¿Registrar la recogida sin foto?" : "¿Registrar el retorno sin foto?",
+                            isPresented: $showNoPhotoConfirm, titleVisibility: .visible) {
+            Button("Registrar sin foto") { save() }
+            Button("Cancelar", role: .cancel) { }
+        } message: {
+            Text("La foto es el camino normal. Sin ella queda registrado igual y la oficina lo verá.")
+        }
         .alert("Cámara sin permiso", isPresented: $showCameraDenied) {
             #if canImport(UIKit)
             Button("Abrir Ajustes") {
@@ -214,12 +229,12 @@ struct ReturnFlowView: View {
     }
 
     private func save() {
-        guard let clientCode = selectedClientCode, let photoPath,
+        guard let clientCode = selectedClientCode,
               let truckID = try? dispatch.repo.routeHeader()?.truckID else { return }
         dispatch.registerReturn(kind: mode.kind, truckID: truckID, clientCode: clientCode, items: items,
                                 note: note.isEmpty ? nil : note,
                                 clientReference: clientReference.isEmpty ? nil : clientReference,
-                                photoPath: photoPath)
+                                photoPath: photoPath)   // opcional: nil = sin foto (acto deliberado)
         saved = true
     }
 

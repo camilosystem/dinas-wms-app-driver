@@ -242,7 +242,7 @@ struct DriverRepository {
     /// acción distinta (no se deduplica: el servidor asigna un return_id por POST).
     func enqueueReturn(truckID: String, returnUUID: String, clientCode: String,
                        items: [ProductReturnItemInput], note: String?, clientReference: String?,
-                       photoPath: String, occurredAt: Date,
+                       photoPath: String?, occurredAt: Date,
                        pickupForRequestUUID: String? = nil) throws {
         try database.dbQueue.write { db in
             var a = PendingAction(id: nil, truckID: truckID, kind: .productReturn, orderUUID: nil,

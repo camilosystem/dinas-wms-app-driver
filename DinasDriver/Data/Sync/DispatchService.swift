@@ -157,7 +157,7 @@ final class DispatchService: ObservableObject {
     @discardableResult
     func registerReturn(kind: ReturnKind, truckID: String, clientCode: String,
                         items: [ProductReturnItemInput],
-                        note: String?, clientReference: String?, photoPath: String) -> String {
+                        note: String?, clientReference: String?, photoPath: String?) -> String {
         let returnUUID = UUID().uuidString
         try? repo.enqueueReturn(truckID: truckID, returnUUID: returnUUID, clientCode: clientCode,
                                 items: items, note: note, clientReference: clientReference,
@@ -313,15 +313,22 @@ final class DispatchService: ObservableObject {
             let summary = try await api.finishRoute()
             serverSummary = summary
         case .productReturn:
-            guard let path = action.photoPath, let clientCode = action.clientCode,
+            guard let clientCode = action.clientCode,
                   let items = action.returnItems, !items.isEmpty,
                   let returnUUID = action.returnUUID else {
                 throw APIError.server(status: 400, message: "Retorno incompleto.")   // permanente → FAILED
             }
-            guard FileManager.default.fileExists(atPath: path) else {
-                throw APIError.server(status: 400, message: "La foto del retorno ya no está en el teléfono.")
+            // ★ v0.68.0 — la foto es OPCIONAL. La ÚNICA vía a "sin foto" (clave omitida) es que el
+            // driver no la sacara: `photoPath == nil`. Una foto que SÍ se sacó (`photoPath != nil`)
+            // pero que no está o no se puede leer NO se degrada a "sin foto" — falla ruidosamente,
+            // porque si no el driver perdería una evidencia y nadie se enteraría.
+            var base64: String? = nil
+            if let path = action.photoPath {
+                guard FileManager.default.fileExists(atPath: path) else {
+                    throw APIError.server(status: 400, message: "La foto del retorno ya no está en el teléfono.")
+                }
+                base64 = try photos.base64(atPath: path)   // ilegible → throw → FAILED, nunca "sin foto"
             }
-            let base64 = try photos.base64(atPath: path)
             // ★ Mismo return_uuid en cada reintento (viene de la cola) → idempotente.
             let request = SubmitReturnRequest(
                 returnUUID: returnUUID, clientCode: clientCode,
@@ -330,7 +337,7 @@ final class DispatchService: ObservableObject {
                 clientReference: action.clientReference,
                 pickupForRequestUUID: action.pickupForRequestUUID)   // ★ v0.45.0 — nil si es espontánea
             _ = try await api.submitReturn(request)
-            photos.delete(atPath: path)   // ★ borra la foto del teléfono al sincronizar
+            if let path = action.photoPath { photos.delete(atPath: path) }   // borra la foto al sincronizar
         case .pickupNotCollected:
             guard let requestUUID = action.pickupForRequestUUID,
                   let reason = action.pickupNotCollectedReason else {

@@ -127,7 +127,7 @@ final class ReturnsTests: XCTestCase {
         XCTAssertEqual(req.items.count, 2, "varios ítems en un retorno")
         XCTAssertEqual(req.occurredAt, registro, "occurred_at = hora de la visita, no la de sync")
         XCTAssertEqual(req.returnUUID, "RET-FIXED", "manda el return_uuid guardado en la cola")
-        XCTAssertFalse(req.photoBase64.isEmpty, "la foto viaja en base64")
+        XCTAssertEqual(req.photoBase64?.isEmpty, false, "con foto, viaja en base64")
         XCTAssertEqual(req.clientReference, "F-123")
         XCTAssertEqual(try service.repo.pendingCount(), 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: path), "★ la foto se borra del teléfono tras sincronizar")
@@ -135,6 +135,74 @@ final class ReturnsTests: XCTestCase {
         // Reintento: no duplica.
         await service.syncPending()
         XCTAssertEqual(api.returnCalls.count, 1, "el replay no duplica el retorno")
+    }
+
+    // MARK: - Dr3 (★ v0.68.0): retorno SIN foto, de punta a punta y sin conexión
+
+    /// El escenario real de Dr3: driver sin foto es casi siempre driver sin señal. El retorno sin
+    /// foto se encola, SOBREVIVE offline, y sube cuando vuelve la señal — OMITIENDO la clave
+    /// `photo_base64` (la ausencia de un hecho no es un valor; el server deriva `has_photo`).
+    /// SABOTAJE: si algún borde vuelve a exigir la foto, la subida sin foto se cae → returnCalls
+    /// queda vacío y esto se pone rojo.
+    func test_offline_sinFoto_encola_sobrevive_ySubeOmitiendoLaClave() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let photos = tempPhotoStore()
+        let api = StubDispatchAPI(); api.route = try makeRoute()
+        let service = DispatchService(database: db, api: api, now: { Date(timeIntervalSince1970: 2000) },
+                                      photos: photos)
+        try service.repo.saveRoute(api.route!)
+
+        // Registrar SIN foto (photoPath: nil) — acto deliberado del driver.
+        try service.repo.enqueueReturn(
+            truckID: "TRK-1", returnUUID: "RET-SINFOTO", clientCode: "C1",
+            items: [ProductReturnItemInput(itemCode: "CANOA-01", itemName: "Canoa Frozen Mango Pulp",
+                                           quantity: 1, reason: .danado)],
+            note: nil, clientReference: nil, photoPath: nil, occurredAt: Date(timeIntervalSince1970: 6000))
+
+        // Sin señal: sobrevive encolado, no se envía.
+        api.offline = true
+        await service.syncPending()
+        XCTAssertEqual(try service.repo.pendingCount(), 1, "sobrevive encolado sin señal")
+        XCTAssertTrue(api.returnCalls.isEmpty)
+
+        // Vuelve la señal: sube UNA vez, SIN foto.
+        api.offline = false
+        await service.syncPending()
+        XCTAssertEqual(api.returnCalls.count, 1)
+        let req = try XCTUnwrap(api.returnCalls.first)
+        XCTAssertNil(req.photoBase64, "sin foto → base64 nil")
+        // La clave se OMITE en el JSON (no viaja como null): es lo que el contrato v0.68.0 fijó.
+        let json = String(decoding: try JSONCoding.encoder.encode(req), as: UTF8.self)
+        XCTAssertFalse(json.contains("photo_base64"), "la clave se omite; la ausencia no es un valor")
+        XCTAssertEqual(try service.repo.pendingCount(), 0, "entró: ya no está en la cola")
+    }
+
+    /// Foto ROTA ≠ sin foto. Un retorno que SÍ tiene foto (photoPath != nil) pero cuyo archivo no
+    /// está / no se puede leer NO se degrada a "sin foto": falla RUIDOSAMENTE (queda .failed), no se
+    /// sube como si el driver hubiera elegido no sacarla. Si los dos terminaran igual, el driver
+    /// perdería una evidencia que sí tomó y nadie se enteraría.
+    /// SABOTAJE: si el borde de subida convierte el archivo ausente en "sin foto", returnCalls
+    /// tendría 1 (con base64 nil) y failedActionsCount 0 → esto se pone rojo.
+    func test_fotoPerdida_noSeDegradaASinFoto_fallaRuidosamente() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let photos = tempPhotoStore()
+        let api = StubDispatchAPI(); api.route = try makeRoute()
+        let service = DispatchService(database: db, api: api, photos: photos)
+        try service.repo.saveRoute(api.route!)
+
+        // photoPath apunta a un archivo que NO existe (se perdió al guardar/subir).
+        let lost = photos.folder.appendingPathComponent("no-existe-\(UUID().uuidString).jpg").path
+        try service.repo.enqueueReturn(
+            truckID: "TRK-1", returnUUID: "RET-PERDIDA", clientCode: "C1",
+            items: [ProductReturnItemInput(itemCode: "CANOA-01", itemName: "Canoa Frozen Mango Pulp",
+                                           quantity: 1, reason: .danado)],
+            note: nil, clientReference: nil, photoPath: lost, occurredAt: Date(timeIntervalSince1970: 6000))
+
+        api.offline = false
+        await service.syncPending()
+
+        XCTAssertTrue(api.returnCalls.isEmpty, "NO se sube: una foto perdida no se manda como 'sin foto'")
+        XCTAssertEqual(try service.repo.failedActionsCount(), 1, "falla ruidosamente (.failed), no en silencio")
     }
 
     /// El `return_uuid` se genera al CREAR (registerReturn) y se guarda en la cola — NO al enviar.
