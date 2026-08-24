@@ -14,6 +14,9 @@ struct SubmitPaymentRequest: Encodable {
     let photoBase64: String?
     let note: String?
     let occurredAt: Date
+    /// ★ v0.70.0 (Dr1) — facturas que el cliente dice pagar. `nil` cuando no anotó ninguna: omitir la
+    /// clave y mandar una lista vacía significan lo mismo, así que se omite (el encoder no la escribe).
+    let invoiceDocNums: [String]?
 
     enum CodingKeys: String, CodingKey {
         case paymentUUID = "payment_uuid"
@@ -24,6 +27,7 @@ struct SubmitPaymentRequest: Encodable {
         case photoBase64 = "photo_base64"
         case note
         case occurredAt = "occurred_at"
+        case invoiceDocNums = "invoice_doc_nums"
     }
 }
 

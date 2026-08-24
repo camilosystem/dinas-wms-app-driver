@@ -64,12 +64,7 @@ struct FinishRouteView: View {
     private func serverSummarySection(_ s: RouteSummary) -> some View {
         Section("Ruta cerrada") {
             Label("Todo cuadra con la oficina", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
-            countRow("Entregados", s.deliveredCount, .green)
-            countRow("Parciales", s.partialCount, .orange)
-            countRow("No entregados", s.notDeliveredCount, .red)
-            countRow("Sin registrar", s.pendingCount, .secondary)
-            Label("\(Fmt.qty(s.returnedItems.reduce(0) { $0 + $1.quantity })) unidades retornadas",
-                  systemImage: "arrow.uturn.left").font(.callout)
+            RouteSummaryView(summary: s)   // mismo render que el detalle del historial
         }
     }
 

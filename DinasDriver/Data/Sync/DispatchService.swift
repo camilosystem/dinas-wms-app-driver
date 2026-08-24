@@ -187,11 +187,12 @@ final class DispatchService: ObservableObject {
     @discardableResult
     func registerPayment(truckID: String, clientCode: String, clientName: String, amount: Double,
                          type: PaymentType, checkNumber: String?, note: String?,
-                         photoPath: String?) -> String {
+                         invoiceDocNums: [String] = [], photoPath: String?) -> String {
         let uuid = UUID().uuidString
         let payment = Payment(paymentUUID: uuid, truckID: truckID, clientCode: clientCode,
                               clientName: clientName, amount: amount, paymentType: type,
-                              checkNumber: checkNumber, note: note, photoPath: photoPath,
+                              checkNumber: checkNumber, note: note, invoiceDocNums: invoiceDocNums,
+                              photoPath: photoPath,
                               occurredAt: now(), createdAt: now(), isVoided: false, voidReason: nil,
                               voidedAt: nil, createSynced: false, voidSynced: false)
         try? repo.insertPayment(payment)
@@ -209,6 +210,14 @@ final class DispatchService: ObservableObject {
     }
 
     // MARK: - Sincronización (replay idempotente)
+
+    // ── Historial de rutas (Dr4/Dr5) — lectura directa del servidor (no hay cache local).
+    func closedRoutes(page: Int) async throws -> ClosedRoutesPage {
+        try await api.fetchClosedRoutes(page: page)
+    }
+    func routeDetail(truckID: String) async throws -> RouteSummary {
+        try await api.fetchRouteDetail(truckID: truckID)
+    }
 
     func syncPending() async {
         guard !isSyncing else { return }
@@ -260,7 +269,9 @@ final class DispatchService: ObservableObject {
                         paymentUUID: payment.paymentUUID, clientCode: payment.clientCode,
                         amount: payment.amount, paymentType: payment.paymentType,
                         checkNumber: payment.checkNumber, photoBase64: base64,
-                        note: payment.note, occurredAt: payment.occurredAt)
+                        note: payment.note, occurredAt: payment.occurredAt,
+                        // Omitir vacío = "no anotó ninguna" (== lista vacía para el server).
+                        invoiceDocNums: payment.invoiceDocNums.isEmpty ? nil : payment.invoiceDocNums)
                     _ = try await api.submitPayment(req)
                     try? repo.markPaymentCreateSynced(paymentUUID: payment.paymentUUID)
                     if let path = payment.photoPath { photos.delete(atPath: path) }

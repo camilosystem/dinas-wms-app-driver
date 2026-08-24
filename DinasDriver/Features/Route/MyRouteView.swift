@@ -50,6 +50,12 @@ struct MyRouteView: View {
                     .disabled(dispatch.isSyncing)
                 }
                 ToolbarItem(placement: .primaryAction) { SyncBadge() }
+                // Dr4/Dr5 — volver a mirar las rutas ya cerradas (la jornada de ayer).
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink { RouteHistoryView() } label: {
+                        Label("Historial", systemImage: "clock.arrow.circlepath")
+                    }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     // ★ Guarda: no dejar "perder" pendientes (dinero incluido) sin darse cuenta.
                     Button("Salir") {

@@ -329,6 +329,88 @@ struct RouteSummary: Decodable, Equatable {
     }
 }
 
+// MARK: - Historial de rutas (Dr4/Dr5, ★ v0.69.0)
+
+/// Una ruta que ESTE driver ya cerró, en la LISTA (`GET /dispatch/routes`). Más liviana que el
+/// resumen a propósito: lo justo para reconocer la jornada. El detalle (mismo `RouteSummary` que el
+/// cierre) se pide con `truck_id` — la identidad de la ruta es el camión, no un `route_id` inventado.
+struct ClosedRouteEntry: Decodable, Equatable, Identifiable {
+    let truckID: String
+    /// Nombre ACTUAL del camión (etiqueta viva, no copia histórica). `nil` → la fila usa un respaldo.
+    let truckName: String?
+    /// Día de la jornada, derivado del ARRANQUE (no del cierre): una ruta cerrada a las 00:30
+    /// pertenece a la jornada anterior. `nil` si se cerró sin haberse iniciado nunca — dato en sí,
+    /// no hueco de pantalla. ES UNA ETIQUETA, no la clave (la clave es `truckID`).
+    let routeDate: Date?
+    let startedAt: Date?
+    let finishedAt: Date?
+    let totalOrders: Int
+    let deliveredCount: Int
+    let notDeliveredCount: Int
+
+    var id: String { truckID }
+
+    /// Nombre a mostrar; si `truck_name` es nil/vacío, un respaldo con el prefijo del `truck_id`.
+    var displayName: String {
+        if let n = truckName, !n.isEmpty { return n }
+        return "Camión \(truckID.prefix(6))"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case truckID = "truck_id"
+        case truckName = "truck_name"
+        case routeDate = "route_date"
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+        case totalOrders = "total_orders"
+        case deliveredCount = "delivered_count"
+        case notDeliveredCount = "not_delivered_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        truckID = try c.decode(String.self, forKey: .truckID)   // identidad: requerido
+        truckName = try c.decodeIfPresent(String.self, forKey: .truckName)
+        routeDate = try c.decodeIfPresent(Date.self, forKey: .routeDate)
+        startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
+        finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
+        totalOrders = try c.decodeIfPresent(Int.self, forKey: .totalOrders) ?? 0
+        deliveredCount = try c.decodeIfPresent(Int.self, forKey: .deliveredCount) ?? 0
+        notDeliveredCount = try c.decodeIfPresent(Int.self, forKey: .notDeliveredCount) ?? 0
+    }
+
+    init(truckID: String, truckName: String?, routeDate: Date?, startedAt: Date?, finishedAt: Date?,
+         totalOrders: Int, deliveredCount: Int, notDeliveredCount: Int) {
+        self.truckID = truckID; self.truckName = truckName; self.routeDate = routeDate
+        self.startedAt = startedAt; self.finishedAt = finishedAt; self.totalOrders = totalOrders
+        self.deliveredCount = deliveredCount; self.notDeliveredCount = notDeliveredCount
+    }
+}
+
+/// Página de `GET /dispatch/routes`.
+struct ClosedRoutesPage: Decodable, Equatable {
+    let page: Int
+    let pageSize: Int
+    let total: Int
+    let routes: [ClosedRouteEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case page, pageSize = "page_size", total, routes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        page = try c.decodeIfPresent(Int.self, forKey: .page) ?? 1
+        pageSize = try c.decodeIfPresent(Int.self, forKey: .pageSize) ?? 25
+        total = try c.decodeIfPresent(Int.self, forKey: .total) ?? 0
+        routes = try c.decodeIfPresent([ClosedRouteEntry].self, forKey: .routes) ?? []
+    }
+
+    init(page: Int, pageSize: Int, total: Int, routes: [ClosedRouteEntry]) {
+        self.page = page; self.pageSize = pageSize; self.total = total; self.routes = routes
+    }
+}
+
 /// Un ítem que vuelve en el camión (schema `ReturnedItem`). Sirve para el resumen del servidor
 /// y también para la lista LOCAL de retornados derivada de lo registrado.
 struct ReturnedItem: Decodable, Equatable, Identifiable {

@@ -14,6 +14,8 @@ struct CollectPaymentView: View {
     @State private var type: PaymentType = .cash
     @State private var checkNumber = ""
     @State private var note = ""
+    /// Facturas que el cliente dice pagar (Dr1). Estructurado, opcional; se anotan, no se imputan.
+    @State private var invoices: [String] = []
 
     @State private var photoPath: String?
     @State private var showCamera = false
@@ -69,6 +71,7 @@ struct CollectPaymentView: View {
                 Section("Opcional") {
                     TextField("Nota", text: $note, axis: .vertical)
                 }
+                invoicesSection
                 Section {
                     Button {
                         save()
@@ -102,6 +105,33 @@ struct CollectPaymentView: View {
         }
     }
 
+    /// Facturas que el cliente dice pagar (Dr1). Lista estructurada (no texto libre), OPCIONAL. Sin
+    /// autocompletar desde las facturas del cliente y sin marcar nada en verde: se ANOTAN, no se
+    /// imputan — el servidor no las verifica. La pantalla no debe sugerir lo contrario.
+    private var invoicesSection: some View {
+        Section {
+            ForEach(invoices.indices, id: \.self) { i in
+                HStack {
+                    TextField("N.º de factura", text: $invoices[i])
+                        #if os(iOS)
+                        .autocorrectionDisabled()
+                        #endif
+                    Button(role: .destructive) { invoices.remove(at: i) } label: {
+                        Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            Button { invoices.append("") } label: {
+                Label("Agregar factura", systemImage: "plus.circle")
+            }
+        } header: {
+            Text("Facturas que el cliente dice pagar (opcional)")
+        } footer: {
+            Text("Se anotan tal como las dice el cliente. No se verifican contra el sistema ni se imputan a su cuenta.")
+        }
+    }
+
     private var chequeSection: some View {
         Section("Cheque") {
             TextField("Número de cheque", text: $checkNumber)
@@ -130,6 +160,9 @@ struct CollectPaymentView: View {
                                  amount: amount, type: type,
                                  checkNumber: type == .cheque ? checkNumber : nil,
                                  note: note.isEmpty ? nil : note,
+                                 invoiceDocNums: invoices
+                                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                    .filter { !$0.isEmpty },
                                  photoPath: type == .cheque ? photoPath : nil)
         saved = true
     }

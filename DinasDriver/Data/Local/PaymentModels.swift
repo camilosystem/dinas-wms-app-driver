@@ -26,6 +26,10 @@ struct Payment: Codable, FetchableRecord, PersistableRecord, Identifiable, Equat
     var paymentType: PaymentType
     var checkNumber: String?
     var note: String?
+    /// ★ v0.70.0 (Dr1) — las facturas que el CLIENTE dice estar pagando. Lista estructurada, NO texto
+    /// libre. NO verificadas: el servidor no las valida contra SAP ni el estado de cuenta. Se ANOTAN,
+    /// no se imputan. Vacía = el driver no anotó ninguna (legítimo: un abono a cuenta no nombra factura).
+    var invoiceDocNums: [String] = []
     var photoPath: String?
     var occurredAt: Date
     var createdAt: Date
@@ -66,6 +70,7 @@ struct Payment: Codable, FetchableRecord, PersistableRecord, Identifiable, Equat
         case paymentType = "payment_type"
         case checkNumber = "check_number"
         case note
+        case invoiceDocNums = "invoice_doc_nums"
         case photoPath = "photo_path"
         case occurredAt = "occurred_at"
         case createdAt = "created_at"

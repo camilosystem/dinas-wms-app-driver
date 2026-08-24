@@ -31,6 +31,12 @@ protocol DispatchAPI: Sendable {
     func submitPayment(_ request: SubmitPaymentRequest) async throws -> PaymentAck
     /// `POST /dispatch/payments/{uuid}/void`. Anula un pago con motivo. Idempotente. 200.
     func voidPayment(paymentUUID: String, request: VoidPaymentRequest) async throws -> PaymentAck
+
+    // ── Historial de rutas (Dr4/Dr5, ★ v0.69.0) ──
+    /// `GET /dispatch/routes`. Rutas que este driver ya cerró (paginado). Solo jornadas terminadas.
+    func fetchClosedRoutes(page: Int) async throws -> ClosedRoutesPage
+    /// `GET /dispatch/routes/{truck_id}`. El MISMO `RouteSummary` que el cierre. 404 si no es suya.
+    func fetchRouteDetail(truckID: String) async throws -> RouteSummary
 }
 
 /// Cliente HTTP contra el middleware, según `contracts/openapi.yaml` (v0.14.0).
@@ -86,6 +92,17 @@ struct APIClient: AuthAPI, DispatchAPI {
         return try await send(request, decode: RouteSummary.self)
     }
 
+    func fetchClosedRoutes(page: Int) async throws -> ClosedRoutesPage {
+        let request = try makeRequest(path: "dispatch/routes", method: "GET",
+                                      query: [URLQueryItem(name: "page", value: String(page))])
+        return try await send(request, decode: ClosedRoutesPage.self)
+    }
+
+    func fetchRouteDetail(truckID: String) async throws -> RouteSummary {
+        let request = try makeRequest(path: "dispatch/routes/\(truckID)", method: "GET")
+        return try await send(request, decode: RouteSummary.self)
+    }
+
     func submitReturn(_ body: SubmitReturnRequest) async throws -> ProductReturn {
         let data = try JSONCoding.encoder.encode(body)
         let request = try makeRequest(path: "dispatch/returns", method: "POST", body: data)
@@ -131,11 +148,13 @@ struct APIClient: AuthAPI, DispatchAPI {
 
     // MARK: - Infra HTTP
 
-    private func makeRequest(path: String, method: String,
+    private func makeRequest(path: String, method: String, query: [URLQueryItem] = [],
                              body: Data? = nil, authenticated: Bool = true) throws -> URLRequest {
         guard let baseURL else { throw APIError.missingBaseURL }
-        guard let url = URLComponents(url: baseURL.appendingPathComponent(path),
-                                      resolvingAgainstBaseURL: false)?.url else {
+        var components = URLComponents(url: baseURL.appendingPathComponent(path),
+                                       resolvingAgainstBaseURL: false)
+        if !query.isEmpty { components?.queryItems = query }
+        guard let url = components?.url else {
             throw APIError.missingBaseURL
         }
         var request = URLRequest(url: url)

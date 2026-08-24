@@ -194,6 +194,14 @@ struct AppDatabase {
             }
         }
 
+        // ★ v0.70.0 (Dr1) — facturas que el cliente dice pagar, como lista (JSON). NOT NULL con
+        // default "[]": vacío = no anotó ninguna (legítimo), nunca ausente.
+        migrator.registerMigration("v7_invoice_doc_nums") { db in
+            try db.alter(table: "payments") { t in
+                t.add(column: "invoice_doc_nums", .text).notNull().defaults(to: "[]")
+            }
+        }
+
         return migrator
     }
 }

@@ -88,4 +88,16 @@ final class StubDispatchAPI: AuthAPI, DispatchAPI, @unchecked Sendable {
         voidCalls.append((paymentUUID, request))
         return PaymentAck(paymentUUID: paymentUUID)
     }
+
+    // ── Historial de rutas (Dr4/Dr5) ──
+    var closedRoutes = ClosedRoutesPage(page: 1, pageSize: 25, total: 0, routes: [])
+    var routeDetail: RouteSummary?
+    func fetchClosedRoutes(page: Int) async throws -> ClosedRoutesPage {
+        try guardOnline(); return closedRoutes
+    }
+    func fetchRouteDetail(truckID: String) async throws -> RouteSummary {
+        try guardOnline()
+        guard let d = routeDetail else { throw APIError.server(status: 404, message: "no existe") }
+        return d
+    }
 }

@@ -89,6 +89,35 @@ final class PaymentsTests: XCTestCase {
         return (s, api)
     }
 
+    // MARK: - Dr1: facturas anotadas (★ v0.70.0)
+
+    // Las facturas que el cliente dice pagar viajan ESTRUCTURADAS en el request y persisten en el
+    // pago local. Son lo que dijo el cliente; se anotan, no se imputan.
+    func test_facturasAnotadas_viajanComoLista_yPersisten() async throws {
+        let (s, api) = service()
+        let uuid = s.registerPayment(truckID: "T1", clientCode: "C1", clientName: "Tienda Uno",
+                                     amount: 520.72, type: .cash, checkNumber: nil, note: nil,
+                                     invoiceDocNums: ["4136", "6154"], photoPath: nil)
+        await s.syncPending()
+        let req = try XCTUnwrap(api.paymentCalls.first)
+        XCTAssertEqual(req.invoiceDocNums, ["4136", "6154"], "viajan como lista, no como texto libre")
+        XCTAssertEqual(try s.repo.payment(uuid: uuid)?.invoiceDocNums, ["4136", "6154"],
+                       "quedan estructuradas en el pago local (recuperarlas de una nota sería imposible)")
+    }
+
+    // Sin facturas anotadas, la CLAVE se omite: omitir y mandar lista vacía significan lo mismo (no
+    // anotó ninguna), y es legítimo y frecuente (un abono a cuenta no nombra factura).
+    func test_sinFacturas_omiteLaClave() async throws {
+        let (s, api) = service()
+        _ = s.registerPayment(truckID: "T1", clientCode: "C1", clientName: "Tienda Uno",
+                              amount: 100, type: .cash, checkNumber: nil, note: nil, photoPath: nil)
+        await s.syncPending()
+        let req = try XCTUnwrap(api.paymentCalls.first)
+        XCTAssertNil(req.invoiceDocNums, "sin facturas → nil")
+        let json = String(decoding: try JSONCoding.encoder.encode(req), as: UTF8.self)
+        XCTAssertFalse(json.contains("invoice_doc_nums"), "la clave no viaja cuando no se anotó ninguna")
+    }
+
     // MARK: - CASH: sin foto ni número
 
     func test_cash_sinFotoNiNumero_generaUUID_ySincroniza() async throws {
