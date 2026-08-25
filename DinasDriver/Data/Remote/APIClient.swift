@@ -32,6 +32,16 @@ protocol DispatchAPI: Sendable {
     /// `POST /dispatch/payments/{uuid}/void`. Anula un pago con motivo. Idempotente. 200.
     func voidPayment(paymentUUID: String, request: VoidPaymentRequest) async throws -> PaymentAck
 
+    // ── Custodia del dinero (Dr2, ★ v0.80.0) ──
+    /// `GET /dispatch/my-cash`. Lo que el driver tiene SIN declarar entregado (cruza rutas).
+    func fetchMyCash() async throws -> DriverCash
+    /// `POST /dispatch/payments/{uuid}/handover`. Declara que el dinero se entregó en bodega
+    /// (pone `handed_over_at` con hora del servidor). Idempotente → 200. 409 si el pago está anulado.
+    func declareHandover(paymentUUID: String) async throws -> RemotePayment
+    /// `DELETE /dispatch/payments/{uuid}/handover`. Deshace la declaración (suma al conteo, con hora).
+    /// NO idempotente en el conteo. 409 si ya está en un depósito, o si no estaba declarado.
+    func undoHandover(paymentUUID: String) async throws -> RemotePayment
+
     // ── Historial de rutas (Dr4/Dr5, ★ v0.69.0) ──
     /// `GET /dispatch/routes`. Rutas que este driver ya cerró (paginado). Solo jornadas terminadas.
     func fetchClosedRoutes(page: Int) async throws -> ClosedRoutesPage
@@ -126,6 +136,23 @@ struct APIClient: AuthAPI, DispatchAPI {
         let data = try JSONCoding.encoder.encode(body)
         let request = try makeRequest(path: "dispatch/payments/\(paymentUUID)/void", method: "POST", body: data)
         return try await send(request, decode: PaymentAck.self)
+    }
+
+    // MARK: - Custodia del dinero (Dr2)
+
+    func fetchMyCash() async throws -> DriverCash {
+        let request = try makeRequest(path: "dispatch/my-cash", method: "GET")
+        return try await send(request, decode: DriverCash.self)
+    }
+
+    func declareHandover(paymentUUID: String) async throws -> RemotePayment {
+        let request = try makeRequest(path: "dispatch/payments/\(paymentUUID)/handover", method: "POST")
+        return try await send(request, decode: RemotePayment.self)
+    }
+
+    func undoHandover(paymentUUID: String) async throws -> RemotePayment {
+        let request = try makeRequest(path: "dispatch/payments/\(paymentUUID)/handover", method: "DELETE")
+        return try await send(request, decode: RemotePayment.self)
     }
 
     // MARK: - Alcanzabilidad

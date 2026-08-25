@@ -42,6 +42,13 @@ final class DispatchService: ObservableObject {
     /// El resumen del servidor tras cerrar (si llegó). Si no, se usa el local.
     @Published private(set) var serverSummary: RouteSummary?
 
+    // ── Custodia del dinero (Dr2). "Mi caja" es server-autoritativa: cruza rutas y sabe qué está
+    //    declarado entregado. Se refresca al entrar y tras cada declarar/deshacer. ──
+    @Published private(set) var cash: DriverCash?
+    @Published private(set) var isLoadingCash = false
+    /// Mensaje si no se pudo traer la caja (p. ej. sin red). La caja necesita servidor.
+    @Published var cashError: String?
+
     private(set) var repo: DriverRepository
     private let api: DispatchAPI
     private let onUnauthorized: () -> Void
@@ -207,6 +214,55 @@ final class DispatchService: ObservableObject {
         try? repo.voidPaymentLocally(paymentUUID: paymentUUID, reason: reason, at: now())
         refreshPending()
         Task { await syncPending() }
+    }
+
+    // MARK: - Custodia del dinero (Dr2)
+
+    /// Trae "Mi caja" del servidor (lo no declarado, cruzando rutas). En línea a propósito: la
+    /// declaración es un acto contra la oficina, y la marca de custodia vive en el servidor.
+    func loadMyCash() async {
+        isLoadingCash = true
+        defer { isLoadingCash = false }
+        do {
+            cash = try await api.fetchMyCash()
+            cashError = nil
+        } catch APIError.unauthorized {
+            onUnauthorized()
+        } catch {
+            // Sin red: no se inventa una caja. Se conserva la última traída (si la hay) y se avisa.
+            cashError = "No se pudo traer tu caja. Conéctate e inténtalo de nuevo."
+        }
+    }
+
+    /// Declara que un pago se entregó en bodega. Es una DECLARACIÓN del driver, no un acuse de la
+    /// oficina. Refresca la caja al terminar. Devuelve el resultado para que la vista diga la palabra
+    /// exacta (declarado / anulado / sin red).
+    func declareHandover(paymentUUID: String) async -> HandoverOutcome {
+        do {
+            let payment = try await api.declareHandover(paymentUUID: paymentUUID)
+            await loadMyCash()
+            return .ok(payment)
+        } catch APIError.unauthorized {
+            onUnauthorized()
+            return .error(nil)
+        } catch {
+            return HandoverOutcome.from(error, isUndo: false)
+        }
+    }
+
+    /// Deshace una declaración. Suma al conteo de la oficina (con hora): retractarse es un hecho y no
+    /// se puede tapar. 409 si la oficina ya lo metió en un depósito.
+    func undoHandover(paymentUUID: String) async -> HandoverOutcome {
+        do {
+            let payment = try await api.undoHandover(paymentUUID: paymentUUID)
+            await loadMyCash()
+            return .ok(payment)
+        } catch APIError.unauthorized {
+            onUnauthorized()
+            return .error(nil)
+        } catch {
+            return HandoverOutcome.from(error, isUndo: true)
+        }
     }
 
     // MARK: - Sincronización (replay idempotente)

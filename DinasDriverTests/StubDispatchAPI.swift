@@ -89,6 +89,36 @@ final class StubDispatchAPI: AuthAPI, DispatchAPI, @unchecked Sendable {
         return PaymentAck(paymentUUID: paymentUUID)
     }
 
+    // ── Custodia del dinero (Dr2) ──
+    var myCash = DriverCash(totalAmount: 0, payments: [])
+    /// Si no es nil, `declareHandover`/`undoHandover` lanzan este error (p. ej. 409).
+    var handoverError: APIError?
+    private(set) var declareCalls: [String] = []
+    private(set) var undoCalls: [String] = []
+
+    func fetchMyCash() async throws -> DriverCash {
+        try guardOnline(); return myCash
+    }
+    func declareHandover(paymentUUID: String) async throws -> RemotePayment {
+        try guardOnline()
+        if let e = handoverError { throw e }
+        declareCalls.append(paymentUUID)
+        return myCash.payments.first { $0.paymentUUID == paymentUUID }
+            ?? RemotePayment(paymentUUID: paymentUUID, clientCode: "C", amount: 0,
+                             occurredAt: Date(timeIntervalSince1970: 0),
+                             recordedAt: Date(timeIntervalSince1970: 0),
+                             handedOverAt: Date(timeIntervalSince1970: 1))
+    }
+    func undoHandover(paymentUUID: String) async throws -> RemotePayment {
+        try guardOnline()
+        if let e = handoverError { throw e }
+        undoCalls.append(paymentUUID)
+        return RemotePayment(paymentUUID: paymentUUID, clientCode: "C", amount: 0,
+                             occurredAt: Date(timeIntervalSince1970: 0),
+                             recordedAt: Date(timeIntervalSince1970: 0),
+                             handedOverAt: nil, handoverUndoneCount: 1)
+    }
+
     // ── Historial de rutas (Dr4/Dr5) ──
     var closedRoutes = ClosedRoutesPage(page: 1, pageSize: 25, total: 0, routes: [])
     var routeDetail: RouteSummary?
