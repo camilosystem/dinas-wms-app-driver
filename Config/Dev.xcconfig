@@ -9,4 +9,4 @@ INFOPLIST_FILE = DinasDriver/Resources/Info-Dev.plist
 
 // Middleware local (.NET/Kestrel) en la red de la Mac. HTTP → requiere el Info-Dev.plist.
 // El truco /$()/ evita que el // del esquema se lea como comentario en xcconfig.
-MIDDLEWARE_BASE_URL = http:/$()/192.168.1.33:5257/v1
+MIDDLEWARE_BASE_URL = http:/$()/100.94.115.58:5257/v1
