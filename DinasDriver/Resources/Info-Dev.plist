@@ -38,18 +38,16 @@
 	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<!-- ★ Demo BLOQUEADA a VERTICAL (solo build Dev): la demo se hace en portrait y no rota
+	     — es lo único verificado en vivo. Fijar la orientación elimina la superficie de landscape
+	     que no se probó. Prod (Info.plist) conserva todas las orientaciones, no se toca. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>
