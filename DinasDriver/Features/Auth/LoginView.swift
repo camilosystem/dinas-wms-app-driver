@@ -18,6 +18,24 @@ struct LoginView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // ★ Logo de la app (solo en el login). Asset ADAPTATIVO: la variante de color en
+                // modo claro y la blanca en modo oscuro — el login sigue al sistema, así que un solo
+                // archivo se perdería en un modo. Fondo de fila transparente para que asiente sobre
+                // el fondo del sistema y contraste en ambos. Derivado de DinasApp.png / _blanco.png.
+                Section {
+                    HStack {
+                        Spacer()
+                        Image("DinasLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 88)
+                            .accessibilityLabel("Dinas App")
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowBackground(Color.clear)
+
                 Section("Acceso") {
                     TextField("Usuario", text: $username)
                         .textContentType(.username)
